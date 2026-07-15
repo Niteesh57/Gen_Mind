@@ -30,8 +30,8 @@ export const ClipchampDropzone: React.FC = () => {
       }
       await reloadAssets();
     } catch (err) {
-      console.error('B2 Upload failed', err);
-      alert('Error uploading to Backblaze B2 storage.');
+      console.error('Upload failed', err);
+      alert('Error uploading file to cloud storage.');
     } finally {
       setIsUploading(false);
     }
@@ -75,10 +75,9 @@ export const ClipchampDropzone: React.FC = () => {
 
       <div className={styles.b2Badge}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-          <path d="M7 11V7a5 5 0 019.9-1" />
+          <path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" />
         </svg>
-        <span>Backblaze B2 Object Lock</span>
+        <span>Cloud Storage Sync</span>
       </div>
 
       {isUploading && (
@@ -86,7 +85,7 @@ export const ClipchampDropzone: React.FC = () => {
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
             <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
           </svg>
-          <span>Uploading & Registering SHA-256...</span>
+          <span>Uploading to cloud storage...</span>
         </div>
       )}
     </div>

@@ -1,70 +1,139 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { useEditor } from '../../context/EditorContext';
-import { type MediaAsset } from '../../services/editorService';
+import { type TimelineClip } from '../../services/editorService';
 import styles from './Timeline.module.css';
 
 export const Timeline: React.FC = () => {
-  const { timelineTracks, activeTool, setActiveTool, playheadPx, setPlayheadPx, addClipToTrack } = useEditor();
-  const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
+  const {
+    timelineTracks,
+    playheadPx,
+    setPlayheadPx,
+    activeTool,
+    setActiveTool,
+    isPlaying,
+    setIsPlaying,
+    moveClipInTimeline,
+    applyTransitionToClip,
+    applyEffectToClip,
+    addTrack,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useEditor();
 
-  const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left + e.currentTarget.scrollLeft;
-    setPlayheadPx(Math.max(0, Math.min(1800, clickX)));
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const dragClipRef = useRef<{ clip: TimelineClip; trackId: string; startX: number; origOffset: number } | null>(null);
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 100);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${ms.toString().padStart(2, '0')}`;
   };
 
-  const handleDragOverTrack = (e: React.DragEvent<HTMLDivElement>, trackId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = 'copy';
-    if (dragOverTrackId !== trackId) {
-      setDragOverTrackId(trackId);
+  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (dragClipRef.current) return;
+    if (timelineRef.current) {
+      const rect = timelineRef.current.getBoundingClientRect();
+      const clickX = e.clientX - rect.left + timelineRef.current.scrollLeft - 180;
+      if (clickX >= 0) {
+        setPlayheadPx(clickX);
+      }
     }
   };
 
-  const handleDragLeaveTrack = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverTrackId(null);
+  const handleClipDragStart = (e: React.DragEvent, clip: TimelineClip, trackId: string) => {
+    e.dataTransfer.setData('application/json', JSON.stringify({ clipId: clip.id, sourceTrackId: trackId }));
   };
 
-  const handleDropOnTrack = (e: React.DragEvent<HTMLDivElement>, trackId: string) => {
-    e.preventDefault();
+  const handleClipMouseDown = (e: React.MouseEvent, clip: TimelineClip, trackId: string) => {
     e.stopPropagation();
-    setDragOverTrackId(null);
+    dragClipRef.current = {
+      clip,
+      trackId,
+      startX: e.clientX,
+      origOffset: clip.startOffsetPx,
+    };
 
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!dragClipRef.current) return;
+      const deltaX = moveEvent.clientX - dragClipRef.current.startX;
+      const newPx = Math.max(0, dragClipRef.current.origOffset + deltaX);
+      moveClipInTimeline(dragClipRef.current.clip.id, dragClipRef.current.trackId, newPx);
+    };
+
+    const handleMouseUp = () => {
+      dragClipRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleTrackDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleTrackDrop = (e: React.DragEvent, trackId: string) => {
+    e.preventDefault();
     try {
       const dataStr = e.dataTransfer.getData('application/json');
-      if (dataStr) {
-        const asset: MediaAsset = JSON.parse(dataStr);
-        addClipToTrack(trackId, asset);
+      if (!dataStr) return;
+      const data = JSON.parse(dataStr);
+
+      if (timelineRef.current) {
+        const rect = timelineRef.current.getBoundingClientRect();
+        const dropPx = Math.max(0, e.clientX - rect.left + timelineRef.current.scrollLeft - 180);
+
+        if (data.action === 'transition') {
+          applyTransitionToClip(trackId, data.name, dropPx);
+          return;
+        }
+        if (data.action === 'effect') {
+          applyEffectToClip(trackId, data.name);
+          return;
+        }
+        if (data.clipId && data.sourceTrackId) {
+          moveClipInTimeline(data.clipId, trackId, dropPx);
+        }
       }
     } catch (err) {
-      console.error('Failed to parse dropped media asset', err);
+      console.error('Track drop failed', err);
     }
   };
 
-  const ticks = ['00:00', '00:10', '00:20', '00:30', '00:40', '00:50', '01:00', '01:10', '01:20', '01:30', '01:40', '01:50', '02:00'];
+  // Calculate dynamic infinite duration based on maximum clip end position
+  const maxClipEndPx = Math.max(
+    ...timelineTracks.flatMap((track) => track.clips.map((c) => c.startOffsetPx + c.widthPx)),
+    1600
+  );
+  const infiniteRulerPx = maxClipEndPx + 1000;
+  const timeMarkersCount = Math.floor(infiniteRulerPx / 100); // Every 100px = 5 seconds
 
   return (
-    <div className={styles.timelineContainer}>
+    <div className={styles.container}>
+      {/* Top Toolbar */}
       <div className={styles.toolbar}>
         <div className={styles.toolsLeft}>
           <button
-            className={`${styles.toolButton} ${activeTool === 'pan' ? styles.toolButtonActive : ''}`}
-            title="Pan & Select Tool"
+            className={`${styles.toolBtn} ${activeTool === 'pan' ? styles.toolBtnActive : ''}`}
             onClick={() => setActiveTool('pan')}
+            title="Selection Tool"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
             </svg>
           </button>
+
           <button
-            className={`${styles.toolButton} ${activeTool === 'cut' ? styles.toolButtonActive : ''}`}
-            title="Razor Cut Tool"
+            className={`${styles.toolBtn} ${activeTool === 'cut' ? styles.toolBtnActive : ''}`}
             onClick={() => setActiveTool('cut')}
+            title="Blade / Cut Tool"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="6" cy="6" r="3" />
               <circle cx="6" cy="18" r="3" />
               <line x1="20" y1="4" x2="8.12" y2="15.88" />
@@ -72,102 +141,141 @@ export const Timeline: React.FC = () => {
               <line x1="8.12" y1="8.12" x2="12" y2="12" />
             </svg>
           </button>
-          <div className={styles.toolDivider} />
-          <button className={styles.toolButton} title="Undo" onClick={() => setActiveTool('undo')}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2M3 10l6 6m-6-6l6-6" />
+
+          <div className={styles.separator} />
+
+          <button
+            className={styles.toolBtn}
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            style={{ opacity: canUndo ? 1 : 0.4 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 7v6h6" />
+              <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
             </svg>
           </button>
-          <button className={styles.toolButton} title="Redo" onClick={() => setActiveTool('redo')}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 10H11a5 5 0 00-5 5v2m15-7l-6 6m6-6l-6-6" />
+
+          <button
+            className={styles.toolBtn}
+            onClick={redo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y)"
+            style={{ opacity: canRedo ? 1 : 0.4 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 7v6h-6" />
+              <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7" />
             </svg>
+          </button>
+
+          <div className={styles.separator} />
+
+          {/* Dynamic Unlimited Tracks Buttons */}
+          <button className={styles.addTrackBtn} onClick={() => addTrack('video')} title="Create a new dynamic Video track">
+            + Add Video Track
+          </button>
+          <button className={styles.addTrackBtn} onClick={() => addTrack('audio')} title="Create a new dynamic Audio track">
+            + Add Audio Track
           </button>
         </div>
 
-        <div className={styles.zoomBar}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          <div className={styles.zoomSliderTrack} onClick={() => alert('Timeline scale: 100% (Default frames view)')}>
-            <div className={styles.zoomThumb} />
+        <div className={styles.timecodeDisplay}>
+          <button className={styles.playBtnMini} onClick={() => setIsPlaying(!isPlaying)}>
+            {isPlaying ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" />
+                <rect x="14" y="4" width="4" height="16" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            )}
+          </button>
+          <span>{formatTime(playheadPx / 20)}</span>
+        </div>
+
+        <div className={styles.toolsRight}>
+          <div className={styles.zoomControls}>
+            <button className={styles.zoomBtn}>-</button>
+            <input type="range" min="50" max="200" defaultValue="100" className={styles.zoomSlider} />
+            <button className={styles.zoomBtn}>+</button>
           </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
         </div>
       </div>
 
-      <div className={styles.timelineBody}>
-        <div className={styles.trackHeaders}>
-          <div className={styles.timeRulerHeader} />
-          <div className={styles.headersList}>
-            {timelineTracks.map((track) => (
-              <div
-                key={track.id}
-                className={`${styles.trackHeaderRow} ${track.type === 'audio' ? styles.trackHeaderRowAudio : ''}`}
-              >
+      {/* Main Tracks Area with Dynamic Infinite Ruler */}
+      <div className={styles.tracksContainer} ref={timelineRef} onClick={handleTimelineClick}>
+        {/* Infinite Time Ruler */}
+        <div className={styles.timeRuler} style={{ width: `${infiniteRulerPx + 180}px` }}>
+          <div className={styles.rulerSpacer} />
+          <div className={styles.rulerTicks} style={{ width: `${infiniteRulerPx}px` }}>
+            {Array.from({ length: timeMarkersCount }).map((_, idx) => {
+              const seconds = idx * 5;
+              const mins = Math.floor(seconds / 60);
+              const secs = seconds % 60;
+              const label = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+              return (
+                <div key={idx} className={styles.tickMajor} style={{ left: `${idx * 100}px` }}>
+                  <span>{label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Playhead Marker */}
+        <div className={styles.playhead} style={{ left: `${180 + playheadPx}px` }}>
+          <div className={styles.playheadHandle} />
+          <div className={styles.playheadLine} />
+        </div>
+
+        {/* Tracks List */}
+        <div className={styles.tracksList} style={{ width: `${infiniteRulerPx + 180}px` }}>
+          {timelineTracks.map((track) => (
+            <div
+              key={track.id}
+              className={styles.trackRow}
+              onDragOver={handleTrackDragOver}
+              onDrop={(e) => handleTrackDrop(e, track.id)}
+            >
+              {/* Track Header - Lock feature removed entirely! */}
+              <div className={styles.trackHeader}>
                 <span className={styles.trackName}>{track.name}</span>
                 <div className={styles.trackControls}>
-                  {track.type === 'audio' ? (
-                    <button className={styles.trackButton} title="Mute Track">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" />
-                      </svg>
-                    </button>
-                  ) : (
-                    <button className={styles.trackButton} title="Toggle Track Visibility">
+                  <button
+                    className={styles.trackIconBtn}
+                    title={track.type === 'video' ? 'Toggle Track Visibility' : 'Toggle Track Audio'}
+                  >
+                    {track.type === 'video' ? (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                         <circle cx="12" cy="12" r="3" />
                       </svg>
-                    </button>
-                  )}
-                  <button className={styles.trackButton} title="Lock Track">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 019.9-1" />
-                    </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 010 7.07" />
+                      </svg>
+                    )}
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
 
-        <div className={styles.contentArea}>
-          <div className={styles.timeRuler} onClick={handleRulerClick}>
-            {ticks.map((tick, i) => (
-              <div key={tick} className={`${styles.tick} ${i === 4 ? styles.tickActive : ''}`}>
-                {tick}
-              </div>
-            ))}
-          </div>
-
-          <div className={styles.tracksContainer}>
-            <div className={styles.playhead} style={{ left: `${playheadPx}px` }}>
-              <div className={styles.playheadHandle} />
-            </div>
-
-            {timelineTracks.map((track) => (
-              <div
-                key={track.id}
-                className={styles.trackRow}
-                style={dragOverTrackId === track.id ? { backgroundColor: 'rgba(53, 37, 205, 0.15)', outline: '1px dashed var(--primary)' } : {}}
-                onDragOver={(e) => handleDragOverTrack(e, track.id)}
-                onDragLeave={handleDragLeaveTrack}
-                onDrop={(e) => handleDropOnTrack(e, track.id)}
-              >
+              {/* Track Lane */}
+              <div className={styles.trackLane} style={{ width: `${infiniteRulerPx}px` }}>
                 {track.clips.map((clip) => {
                   if (clip.type === 'text') {
                     return (
                       <div
                         key={clip.id}
-                        className={styles.clipText}
-                        style={{ left: `${clip.startOffsetPx}px`, width: `${clip.widthPx}px` }}
-                        onClick={() => alert(`Title clip selected: ${clip.title} (${clip.subTitle || 'Title'})`)}
+                        className={`${styles.clipText} ${clip.isSelected ? styles.clipSelected : ''}`}
+                        style={{ left: `${clip.startOffsetPx}px`, width: `${clip.widthPx}px`, cursor: 'grab' }}
+                        draggable={true}
+                        onDragStart={(e) => handleClipDragStart(e, clip, track.id)}
+                        onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <path d="M4 7V4h16v3M9 20h6M12 4v16" />
@@ -182,22 +290,60 @@ export const Timeline: React.FC = () => {
                     <div
                       key={clip.id}
                       className={`${styles.clip} ${clip.isSelected ? styles.clipSelected : ''}`}
-                      style={{ left: `${clip.startOffsetPx}px`, width: `${clip.widthPx}px` }}
-                      onClick={() => alert(`Clip selected: ${clip.title}`)}
+                      style={{ left: `${clip.startOffsetPx}px`, width: `${clip.widthPx}px`, cursor: 'grab' }}
+                      draggable={true}
+                      onDragStart={(e) => handleClipDragStart(e, clip, track.id)}
+                      onMouseDown={(e) => handleClipMouseDown(e, clip, track.id)}
                     >
                       <div className={`${styles.clipHeader} ${clip.isSelected ? styles.clipHeaderSelected : ''}`}>
-                        {clip.title}
+                        <span>{clip.title}</span>
+                        {clip.effect && (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              background: '#7c3aed',
+                              color: '#fff',
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              marginLeft: '6px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            ✨ {clip.effect}
+                          </span>
+                        )}
                       </div>
                       <div
                         className={isVideo ? styles.clipBodyVideo : styles.clipBodyAudio}
                         style={clip.thumbnailUrl ? { backgroundImage: `url("${clip.thumbnailUrl}")` } : {}}
                       />
+                      {clip.transition && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: '45px',
+                            background: 'linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.85))',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#fff',
+                            fontSize: '9px',
+                            fontWeight: 'bold',
+                            borderLeft: '1px solid #c084fc',
+                          }}
+                        >
+                          {clip.transition.type.substring(0, 4)}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

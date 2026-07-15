@@ -1,3 +1,5 @@
+import { listMediaBackend } from './apiClient';
+
 export interface ProjectMetadata {
   id: string;
   name: string;
@@ -10,11 +12,14 @@ export interface ProjectMetadata {
 export interface MediaAsset {
   id: string;
   name: string;
-  type: 'video' | 'image' | 'audio';
+  type: 'video' | 'image' | 'audio' | 'text';
   duration: string;
-  durationSeconds: number;
-  thumbnailUrl: string;
-  isUsed: boolean;
+  durationSeconds?: number;
+  thumbnailUrl?: string;
+  url?: string;
+  isUsed?: boolean;
+  sha256?: string;
+  verified?: boolean;
 }
 
 export interface TimelineClip {
@@ -26,6 +31,8 @@ export interface TimelineClip {
   subTitle?: string;
   thumbnailUrl?: string;
   isSelected?: boolean;
+  transition?: { type: string; duration: string };
+  effect?: string;
 }
 
 export interface TimelineTrack {
@@ -41,6 +48,52 @@ export interface IEditorService {
   createProject(name: string, resolution: string): Promise<ProjectMetadata>;
   getMediaAssets(filter?: 'all' | 'video' | 'image' | 'audio'): Promise<MediaAsset[]>;
   getTimelineTracks(): Promise<TimelineTrack[]>;
+}
+
+export class RealBackendEditorService implements IEditorService {
+  private projectId: string = 'default_project';
+
+  async createProject(name: string, resolution: string): Promise<ProjectMetadata> {
+    const cleanName = name.trim() || 'Untitled Campaign';
+    this.projectId = `proj_${Date.now()}_${cleanName.replace(/\s+/g, '_').toLowerCase()}`;
+    return {
+      id: this.projectId,
+      name: cleanName,
+      resolution: resolution || '1080p (1920x1080)',
+      aspectRatio: resolution.includes('Vertical') ? '9:16' : '16:9',
+      fps: 24,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async getMediaAssets(filter: 'all' | 'video' | 'image' | 'audio' = 'all'): Promise<MediaAsset[]> {
+    try {
+      const assets = await listMediaBackend(this.projectId);
+      if (filter && filter !== 'all') {
+        return assets.filter((a) => a.type === filter);
+      }
+      return assets;
+    } catch {
+      return [];
+    }
+  }
+
+  async getTimelineTracks(): Promise<TimelineTrack[]> {
+    return [
+      {
+        id: 'default_video',
+        name: 'Video 1',
+        type: 'video',
+        clips: [],
+      },
+      {
+        id: 'default_audio',
+        name: 'Audio 1',
+        type: 'audio',
+        clips: [],
+      },
+    ];
+  }
 }
 
 export class MockEditorService implements IEditorService {
@@ -59,123 +112,121 @@ export class MockEditorService implements IEditorService {
   async getMediaAssets(filter: 'all' | 'video' | 'image' | 'audio' = 'all'): Promise<MediaAsset[]> {
     const assets: MediaAsset[] = [
       {
-        id: 'media_1',
-        name: 'Cityscape_Main.mp4',
+        id: 'asset_vid_1',
+        name: 'Cyberpunk Drone Tracking City',
         type: 'video',
         duration: '00:12',
         durationSeconds: 12,
         thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
         isUsed: true,
+        sha256: 'a9b2c3d4e5f67890123456789abcdef0',
+        verified: true,
       },
       {
-        id: 'media_2',
-        name: 'Model_close.mp4',
+        id: 'asset_vid_2',
+        name: 'Futuristic Portrait Neon Glow',
         type: 'video',
         duration: '00:05',
         durationSeconds: 5,
         thumbnailUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
-        isUsed: false,
       },
       {
-        id: 'media_3',
-        name: 'ambient_drone.wav',
-        type: 'audio',
-        duration: '02:14',
-        durationSeconds: 134,
-        thumbnailUrl: '',
-        isUsed: true,
-      },
-      {
-        id: 'media_4',
-        name: 'Mountain_mist.mp4',
+        id: 'asset_vid_3',
+        name: 'Mountain Sunrise Atmospheric',
         type: 'video',
         duration: '00:24',
         durationSeconds: 24,
-        thumbnailUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80',
-        isUsed: false,
+        thumbnailUrl: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600&auto=format&fit=crop&q=80',
+      },
+      {
+        id: 'asset_aud_1',
+        name: 'Synthesizer Cyber Bassline Track',
+        type: 'audio',
+        duration: '01:30',
+        durationSeconds: 90,
+      },
+      {
+        id: 'asset_aud_2',
+        name: 'Cinematic Percussion & Riser Boom',
+        type: 'audio',
+        duration: '00:18',
+        durationSeconds: 18,
+      },
+      {
+        id: 'asset_img_1',
+        name: 'Product Render 3D Floating Studio',
+        type: 'image',
+        duration: '00:05',
+        durationSeconds: 5,
+        thumbnailUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&auto=format&fit=crop&q=80',
       },
     ];
 
-    if (filter === 'all') return assets;
-    return assets.filter((asset) => asset.type === filter);
+    if (filter && filter !== 'all') {
+      return assets.filter((a) => a.type === filter);
+    }
+    return assets;
   }
 
   async getTimelineTracks(): Promise<TimelineTrack[]> {
     return [
       {
-        id: 'track_v2',
+        id: 'default_video_2',
         name: 'Video 2',
-        type: 'text',
+        type: 'video',
         clips: [
           {
-            id: 'clip_text_1',
-            title: 'Main Title',
+            id: 'clip_init_title',
+            title: 'GLITCH CYBER TITLE',
             type: 'text',
-            startOffsetPx: 300,
-            widthPx: 150,
-            subTitle: 'NEO TOKYO',
+            startOffsetPx: 100,
+            widthPx: 180,
+            subTitle: 'Neon Cyber Presentation',
           },
         ],
       },
       {
-        id: 'track_v1',
+        id: 'default_video',
         name: 'Video 1',
         type: 'video',
         clips: [
           {
-            id: 'clip_v_1',
-            title: 'Intro_shot.mp4',
+            id: 'clip_init_1',
+            title: 'Cyberpunk Drone Tracking City',
             type: 'video',
-            startOffsetPx: 0,
-            widthPx: 120,
+            startOffsetPx: 60,
+            widthPx: 240,
             thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
           },
           {
-            id: 'clip_v_2',
-            title: 'Cityscape_Main.mp4',
+            id: 'clip_init_2',
+            title: 'Mountain Sunrise Atmospheric',
             type: 'video',
-            startOffsetPx: 120,
-            widthPx: 280,
-            thumbnailUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
-            isSelected: true,
-          },
-          {
-            id: 'clip_v_3',
-            title: 'Model_close.mp4',
-            type: 'video',
-            startOffsetPx: 400,
-            widthPx: 180,
-            thumbnailUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80',
+            startOffsetPx: 320,
+            widthPx: 300,
+            thumbnailUrl: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600&auto=format&fit=crop&q=80',
           },
         ],
       },
       {
-        id: 'track_a1',
-        name: 'Audio 1 (Voice)',
+        id: 'default_audio',
+        name: 'Audio 1',
         type: 'audio',
         clips: [
           {
-            id: 'clip_a_1',
-            title: 'Cityscape_Main.wav',
+            id: 'clip_init_aud_1',
+            title: 'Synthesizer Cyber Bassline Track',
             type: 'audio',
-            startOffsetPx: 120,
-            widthPx: 280,
+            startOffsetPx: 40,
+            widthPx: 480,
           },
         ],
       },
       {
-        id: 'track_a2',
-        name: 'Audio 2 (Music)',
+        id: 'default_audio_2',
+        name: 'Audio 2',
         type: 'audio',
-        clips: [
-          {
-            id: 'clip_a_2',
-            title: 'ambient_drone_full.wav',
-            type: 'audio',
-            startOffsetPx: 0,
-            widthPx: 800,
-          },
-        ],
+        clips: [],
       },
     ];
   }

@@ -1,65 +1,198 @@
-.library {
-  width: 32%;
-  min-width: 280px;
-  max-width: 360px;
+.panelDrawer {
+  width: 320px;
+  min-width: 320px;
+  height: 100%;
   border-right: 1px solid var(--outline-variant);
   background: var(--surface-container);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition: width 0.25s ease, min-width 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+  z-index: 35;
+}
+
+.panelDrawerClosed {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  border-right: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panelHeader {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--outline-variant);
+  background: var(--surface-container-high);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   flex-shrink: 0;
 }
 
-.header {
-  padding: 12px;
+.panelTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--on-surface);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.closeDrawerBtn {
+  background: transparent;
+  border: none;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.closeDrawerBtn:hover {
+  background: var(--surface);
+  color: var(--on-surface);
+}
+
+.drawerContent {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Generation Options Box */
+.genSection {
+  padding: 14px 16px;
+  background: var(--surface);
   border-bottom: 1px solid var(--outline-variant);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: var(--surface-container-high);
+  gap: 12px;
+  flex-shrink: 0;
 }
 
-.headerRow {
+.genHeader {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.select,
+.textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 6px;
+  border: 1px solid var(--outline-variant);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.select:focus,
+.textarea:focus {
+  border-color: var(--primary);
+}
+
+.textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.chainLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  margin-top: 1px;
+}
+
+.generateButton {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: none;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 2px 6px rgba(53, 37, 205, 0.2);
+  transition: all 0.15s ease;
+}
+
+.generateButton:hover:not(:disabled) {
+  background: var(--primary-container);
+  transform: translateY(-1px);
+}
+
+.generateButton:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.cloudNote {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  text-align: center;
+  font-style: italic;
+  margin-top: -2px;
+}
+
+/* Assets Grid section */
+.assetsSection {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.sectionHeadingRow {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-
-.filters {
-  display: flex;
-  gap: 4px;
-}
-
-.filterPill {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: none;
-  background: transparent;
-  color: var(--on-surface-variant);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.filterPill:hover {
-  background: var(--surface-variant);
-  color: var(--on-surface);
-}
-
-.filterPillActive {
-  background: var(--surface-variant);
-  color: var(--on-surface);
+.sectionHeading {
+  font-size: 12px;
   font-weight: 700;
-}
-
-.grid {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .cardsContainer {
@@ -192,4 +325,46 @@
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
+}
+
+/* Preset Cards (Text / Transitions / Effects) */
+.presetCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--outline-variant);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.presetCard:hover {
+  background: var(--surface-container-low);
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(53, 37, 205, 0.12);
+}
+
+.presetTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.presetSub {
+  font-size: 10px;
+  color: var(--on-surface-variant);
+  line-height: 1.3;
+}
+
+.presetsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
 }
