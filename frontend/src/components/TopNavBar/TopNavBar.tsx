@@ -4,9 +4,11 @@ import { getProjectEventsBackend, type ProjectEvent } from '../../services/apiCl
 import styles from './TopNavBar.module.css';
 
 export const TopNavBar: React.FC = () => {
-  const { project, resetProject, timelineTracks, mediaAssets, undo, redo, canUndo, canRedo } = useEditor();
+  const { project, setProject, resetProject, timelineTracks, mediaAssets, undo, redo, canUndo, canRedo } = useEditor();
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [events, setEvents] = useState<ProjectEvent[]>([]);
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [editedName, setEditedName] = useState<string>('');
 
   const fetchHistory = async () => {
     const list = await getProjectEventsBackend(project?.id || 'default_project');
@@ -18,6 +20,16 @@ export const TopNavBar: React.FC = () => {
       fetchHistory();
     }
   }, [showHistory, project]);
+
+  const handleSaveName = () => {
+    setIsEditingName(false);
+    if (project && editedName.trim() && editedName.trim() !== project.name) {
+      setProject({
+        ...project,
+        name: editedName.trim(),
+      });
+    }
+  };
 
   const handleExportProject = () => {
     const exportManifest = {
@@ -49,7 +61,7 @@ export const TopNavBar: React.FC = () => {
   return (
     <nav className={styles.navbar}>
       <div className={styles.leftSection}>
-        <div className={styles.brand} onClick={resetProject} title="Back to Project Launcher">
+        <div className={styles.brand} onClick={resetProject} title="Back to All Projects / Launcher" style={{ cursor: 'pointer' }}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="23 7 16 12 23 17 23 7"></polygon>
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
@@ -57,15 +69,69 @@ export const TopNavBar: React.FC = () => {
           <span>GenMedia Studio</span>
         </div>
 
-        <div className={styles.navLinks}>
+        <div className={styles.navLinks} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button
-            className={styles.navLinkActive}
             onClick={resetProject}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit' }}
-            title="Click to switch or create new project"
+            style={{
+              background: 'rgba(147, 51, 234, 0.15)',
+              border: '1px solid rgba(147, 51, 234, 0.35)',
+              borderRadius: '6px',
+              padding: '4px 10px',
+              cursor: 'pointer',
+              color: '#c084fc',
+              fontSize: '11px',
+              fontWeight: 700,
+            }}
+            title="Return to Projects List"
           >
-            Project: {project?.name || 'Blank Template'}
+            🏠 All Projects
           </button>
+
+          {isEditingName ? (
+            <input
+              type="text"
+              value={editedName}
+              onChange={(e) => setEditedName(e.target.value)}
+              onBlur={handleSaveName}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
+              style={{
+                background: 'var(--surface-container-lowest)',
+                border: '1px solid #9333ea',
+                borderRadius: '6px',
+                padding: '3px 8px',
+                color: 'var(--on-surface)',
+                fontSize: '13px',
+                fontWeight: 700,
+                outline: 'none',
+                width: '180px',
+              }}
+              autoFocus
+            />
+          ) : (
+            <div
+              onClick={() => {
+                setEditedName(project?.name || 'Untitled 1');
+                setIsEditingName(true);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                background: 'var(--surface-container-low)',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                border: '1px solid var(--outline-variant)',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: 'var(--on-surface)',
+              }}
+              title="Click to rename project anytime"
+            >
+              <span>Project: <b>{project?.name || 'Untitled 1'}</b></span>
+              <span style={{ fontSize: '11px', color: '#9333ea' }}>✎</span>
+            </div>
+          )}
         </div>
       </div>
 

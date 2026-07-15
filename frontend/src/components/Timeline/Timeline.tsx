@@ -170,39 +170,7 @@ export const Timeline: React.FC = () => {
             </svg>
           </button>
 
-          <div className={styles.separator} />
-
-          {/* Dynamic Unlimited Tracks Buttons */}
-          <button className={styles.addTrackBtn} onClick={() => addTrack('video')} title="Create a new dynamic Video track">
-            + Add Video Track
-          </button>
-          <button className={styles.addTrackBtn} onClick={() => addTrack('audio')} title="Create a new dynamic Audio track">
-            + Add Audio Track
-          </button>
-        </div>
-
-        <div className={styles.timecodeDisplay}>
-          <button className={styles.playBtnMini} onClick={() => setIsPlaying(!isPlaying)}>
-            {isPlaying ? (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-              </svg>
-            ) : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-            )}
-          </button>
-          <span>{formatTime(playheadPx / 20)}</span>
-        </div>
-
-        <div className={styles.toolsRight}>
-          <div className={styles.zoomControls}>
-            <button className={styles.zoomBtn}>-</button>
-            <input type="range" min="50" max="200" defaultValue="100" className={styles.zoomSlider} />
-            <button className={styles.zoomBtn}>+</button>
-          </div>
+          {/* Undo / Redo controls only in header */}
         </div>
       </div>
 
@@ -241,23 +209,23 @@ export const Timeline: React.FC = () => {
               onDragOver={handleTrackDragOver}
               onDrop={(e) => handleTrackDrop(e, track.id)}
             >
-              {/* Track Header - Lock feature removed entirely! */}
+              {/* Track Header - Universal Layer */}
               <div className={styles.trackHeader}>
                 <span className={styles.trackName}>{track.name}</span>
                 <div className={styles.trackControls}>
                   <button
                     className={styles.trackIconBtn}
-                    title={track.type === 'video' ? 'Toggle Track Visibility' : 'Toggle Track Audio'}
+                    title={track.lockedType === 'audio' || track.type === 'audio' ? 'Toggle Audio Mute' : 'Toggle Layer Visibility'}
                   >
-                    {track.type === 'video' ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    ) : (
+                    {track.lockedType === 'audio' || track.type === 'audio' ? (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                         <path d="M15.54 8.46a5 5 0 010 7.07" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
                       </svg>
                     )}
                   </button>
@@ -344,6 +312,34 @@ export const Timeline: React.FC = () => {
               </div>
             </div>
           ))}
+
+          {/* Clean Track Sidebar Footer Row (+ Add Layer) */}
+          <div className={styles.trackRow} style={{ borderBottom: 'none', height: '44px' }}>
+            <div className={styles.trackHeader} style={{ height: '44px', gap: '6px', justifyContent: 'flex-start', background: 'transparent', borderRight: '1px solid var(--outline-variant)' }}>
+              <button
+                onClick={() => addTrack()}
+                style={{
+                  background: 'rgba(147, 51, 234, 0.18)',
+                  border: '1px solid rgba(147, 51, 234, 0.45)',
+                  borderRadius: '6px',
+                  padding: '5px 12px',
+                  color: '#c084fc',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  width: '100%',
+                  justifyContent: 'center',
+                }}
+                title="Create a new flexible media layer"
+              >
+                + Add Layer
+              </button>
+            </div>
+            <div className={styles.trackLane} style={{ width: `${infiniteRulerPx}px`, height: '44px', background: 'transparent' }} />
+          </div>
         </div>
       </div>
     </div>

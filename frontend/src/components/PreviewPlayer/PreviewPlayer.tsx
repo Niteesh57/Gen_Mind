@@ -111,12 +111,7 @@ export const PreviewPlayer: React.FC = () => {
 
   return (
     <div className={styles.playerContainer} ref={playerContainerRef}>
-      <div className={styles.playerHeader}>
-        <div className={styles.headerBadge}>Fit (100%)</div>
-        <div className={styles.headerBadge}>
-          {project?.resolution || '1080p (1920x1080) • 24fps'}
-        </div>
-      </div>
+      {/* Red-marked Fit (100%) and 1080p header badges completely removed */}
 
       <div className={styles.canvasArea}>
         <div className={styles.canvasFrame}>
@@ -136,19 +131,40 @@ export const PreviewPlayer: React.FC = () => {
                 objectFit: 'contain',
               }}
             />
-          ) : (
+          ) : activeVideoClip?.thumbnailUrl ? (
             <div
               className={`${styles.videoLayer} ${isPlaying ? styles.videoLayerPlaying : ''}`}
               style={{
-                backgroundImage: activeVideoClip?.thumbnailUrl
-                  ? `url("${activeVideoClip.thumbnailUrl}")`
-                  : 'url("https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1200&auto=format&fit=crop&q=80")',
+                backgroundImage: `url("${activeVideoClip.thumbnailUrl}")`,
                 filter: currentFilter,
                 transition: 'filter 0.3s ease',
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
               }}
             />
+          ) : (
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                background: '#0a0d14',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#475569',
+                fontFamily: 'var(--font-sans)',
+                userSelect: 'none',
+              }}
+            >
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" style={{ marginBottom: '8px', opacity: 0.6 }}>
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Full HD Video Canvas</span>
+              <span style={{ fontSize: '11px', marginTop: '4px' }}>Drag and drop media clips to the timeline below</span>
+            </div>
           )}
 
           {/* Functional Text Title Overlay */}

@@ -192,7 +192,6 @@ export const MediaLibrary: React.FC = () => {
           {activeTab === 'Media' && '🎬 Video Studio'}
           {activeTab === 'Audio' && '🎵 Audio Studio'}
           {activeTab === 'Image' && '🎨 Image Studio'}
-          {activeTab === 'Upscale' && '✨ Upscale Asset'}
           {activeTab === 'Text' && '🔤 Title Presets'}
           {activeTab === 'Transitions' && '⚡ Transitions'}
           {activeTab === 'Effects' && '✨ Video Effects'}
@@ -438,30 +437,7 @@ export const MediaLibrary: React.FC = () => {
           </>
         )}
 
-        {activeTab === 'Upscale' && (
-          <>
-            <form onSubmit={(e) => handleGenerate(e, 'upscale')} className={styles.genSection}>
-              <span className={styles.genHeader}>Upscale Asset Resolution</span>
-              <div className={styles.field}>
-                <label className={styles.label}>Upscale Model</label>
-                <select className={styles.select} value={modelName} onChange={(e) => setModelName(e.target.value)} disabled={isGenerating}>
-                  <option value="nightmareai/real-esrgan">Real-ESRGAN 4x Super-Resolution</option>
-                </select>
-              </div>
-              <div className={styles.field}>
-                <label className={styles.label}>Target Resolution</label>
-                <select className={styles.select} disabled={isGenerating}>
-                  <option value="4k">4K Ultra HD (3840x2160)</option>
-                  <option value="1080p">1080p Full HD (1920x1080)</option>
-                </select>
-              </div>
-              <button type="submit" className={styles.generateButton} disabled={isGenerating}>
-                {isGenerating ? 'Upscaling Asset...' : 'Upscale Asset'}
-              </button>
-              <div className={styles.cloudNote}>Note: Automatically saved to cloud.</div>
-            </form>
-          </>
-        )}
+
 
         {(activeTab === 'Text' || activeTab === 'Transitions' || activeTab === 'Effects') && renderPresetCards()}
       </div>

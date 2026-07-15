@@ -133,63 +133,103 @@ export const EditorProvider: React.FC<EditorProviderProps> = ({ children, servic
     setProject(null);
   }, []);
 
-  const addTrack = useCallback((type: 'video' | 'audio') => {
-    const trackCount = tracksRef.current.filter((t) => t.type === type).length + 1;
+  const addTrack = useCallback((_type?: 'video' | 'audio') => {
+    const nextNum = tracksRef.current.length + 1;
     const newTrack: TimelineTrack = {
-      id: `track_${Date.now()}`,
-      name: `${type === 'video' ? 'Video' : 'Audio'} ${trackCount}`,
-      type,
+      id: `layer_${Date.now()}`,
+      name: `Layer ${nextNum}`,
+      type: 'layer',
+      lockedType: null,
       clips: [],
     };
-    pushUndo([...tracksRef.current, newTrack], `ADD_TRACK_${type.toUpperCase()}`);
+    pushUndo([...tracksRef.current, newTrack], `ADD_LAYER_${nextNum}`);
   }, [pushUndo]);
 
   const addClipToTrack = useCallback((trackIdOrName: string, asset: MediaAsset) => {
-    const newTracks = tracksRef.current.map((track) => {
-      if (track.id !== trackIdOrName && track.name !== trackIdOrName) {
-        if (asset.type === 'audio' && track.type === 'audio' && trackIdOrName === 'default_audio') {
-          // target default audio if track match
-        } else if (asset.type !== 'audio' && track.type === 'video' && trackIdOrName === 'default_video') {
-          // target default video
-        } else {
-          return track;
-        }
+    const target = tracksRef.current.find((t) => t.id === trackIdOrName || t.name === trackIdOrName) || tracksRef.current[0];
+    if (!target) return;
+    const assetCategory: 'video' | 'audio' | 'image' = asset.type === 'image' ? 'image' : asset.type === 'audio' ? 'audio' : 'video';
+
+    const currentLocked = target.lockedType || (target.clips.length > 0 ? (target.clips[0].type === 'audio' ? 'audio' : target.clips[0].title.match(/\.(png|jpg|jpeg|webp|gif)$/i) ? 'image' : 'video') : null);
+
+    if (currentLocked && currentLocked !== assetCategory) {
+      if (currentLocked === 'audio' && (assetCategory === 'video' || assetCategory === 'image')) {
+        alert("Cannot drop Video or Image media into an Audio Layer! Please drop onto an empty Layer or a Video/Image Layer.");
+        return;
       }
+      if ((currentLocked === 'video' || currentLocked === 'image') && assetCategory === 'audio') {
+        alert("Cannot drop Audio media into a Video or Image Layer! Please drop onto an empty Layer or an Audio Layer.");
+        return;
+      }
+      if (currentLocked !== assetCategory) {
+        alert(`Cannot mix ${assetCategory.toUpperCase()} clips into a layer locked to ${currentLocked.toUpperCase()}!`);
+        return;
+      }
+    }
 
-      const newClip: TimelineClip = {
-        id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        title: asset.name,
-        type: asset.type === 'audio' ? 'audio' : asset.type === 'text' ? 'text' : 'video',
-        startOffsetPx: playheadPx,
-        widthPx: (asset.durationSeconds || 8) * 20,
-        thumbnailUrl: asset.thumbnailUrl,
-        isSelected: true,
-      };
+    const newTracks = tracksRef.current.map((track) => {
+      if (track.id === target.id) {
+        const newClip: TimelineClip = {
+          id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          title: asset.name,
+          type: asset.type === 'audio' ? 'audio' : asset.type === 'text' ? 'text' : 'video',
+          startOffsetPx: playheadPx,
+          widthPx: (asset.durationSeconds || 8) * 20,
+          thumbnailUrl: asset.thumbnailUrl,
+          isSelected: true,
+        };
 
-      return {
-        ...track,
-        clips: [...track.clips.map((c) => ({ ...c, isSelected: false })), newClip],
-      };
+        const nextLockedType = track.lockedType || assetCategory;
+        const prefix = nextLockedType === 'image' ? 'Image ' : nextLockedType === 'audio' ? 'Audio ' : 'Video ';
+        const updatedName = track.name.startsWith('Layer ') ? prefix + track.name : track.name;
+
+        return {
+          ...track,
+          lockedType: nextLockedType,
+          name: updatedName,
+          clips: [...track.clips.map((c) => ({ ...c, isSelected: false })), newClip],
+        };
+      }
+      return track;
     });
     pushUndo(newTracks, `ADD_CLIP_${asset.name.substring(0, 15)}`);
   }, [playheadPx, pushUndo]);
 
   const moveClipInTimeline = useCallback((clipId: string, targetTrackId: string, newOffsetPx: number) => {
     let targetClip: TimelineClip | null = null;
+    let sourceTrack: TimelineTrack | null = null;
     for (const t of tracksRef.current) {
       const found = t.clips.find((c) => c.id === clipId);
       if (found) {
         targetClip = { ...found, startOffsetPx: Math.max(0, newOffsetPx), isSelected: true };
+        sourceTrack = t;
         break;
       }
     }
     if (!targetClip) return;
 
+    const targetTrack = tracksRef.current.find((t) => t.id === targetTrackId || t.name === targetTrackId);
+    if (targetTrack && sourceTrack && targetTrack.id !== sourceTrack.id) {
+      const clipCategory: 'video' | 'audio' | 'image' = targetClip.type === 'audio' ? 'audio' : targetClip.title.match(/\.(png|jpg|jpeg|webp|gif)$/i) ? 'image' : 'video';
+      const currentLocked = targetTrack.lockedType || (targetTrack.clips.length > 0 ? (targetTrack.clips[0].type === 'audio' ? 'audio' : targetTrack.clips[0].title.match(/\.(png|jpg|jpeg|webp|gif)$/i) ? 'image' : 'video') : null);
+      if (currentLocked && currentLocked !== clipCategory) {
+        alert(`Cannot move ${clipCategory.toUpperCase()} clip into a layer locked to ${currentLocked.toUpperCase()}!`);
+        return;
+      }
+    }
+
     const newTracks = tracksRef.current.map((t) => {
       const filteredClips = t.clips.filter((c) => c.id !== clipId).map((c) => ({ ...c, isSelected: false }));
       if (t.id === targetTrackId || t.name === targetTrackId) {
+        const clipCategory: 'video' | 'audio' | 'image' = targetClip!.type === 'audio' ? 'audio' : targetClip!.title.match(/\.(png|jpg|jpeg|webp|gif)$/i) ? 'image' : 'video';
+        const nextLockedType = t.lockedType || clipCategory;
+        const prefix = nextLockedType === 'image' ? 'Image ' : nextLockedType === 'audio' ? 'Audio ' : 'Video ';
+        const updatedName = t.name.startsWith('Layer ') ? prefix + t.name : t.name;
+
         return {
           ...t,
+          lockedType: nextLockedType,
+          name: updatedName,
           clips: [...filteredClips, targetClip!],
         };
       }

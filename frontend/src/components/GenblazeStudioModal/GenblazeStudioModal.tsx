@@ -10,7 +10,7 @@ interface GenblazeStudioModalProps {
 
 export const GenblazeStudioModal: React.FC<GenblazeStudioModalProps> = ({ isOpen, onClose }) => {
   const { project, reloadAssets } = useEditor();
-  const [modality, setModality] = useState<'video' | 'image' | 'audio' | 'upscale'>('video');
+  const [modality, setModality] = useState<'video' | 'image' | 'audio'>('video');
   const [modelName, setModelName] = useState('Kling-Image2Video-V2.1-Master');
   const [prompt, setPrompt] = useState('Cinematic drone tracking shot over futuristic glowing neo city at sunset, 4K editorial quality');
   const [chain, setChain] = useState(true);
@@ -19,7 +19,7 @@ export const GenblazeStudioModal: React.FC<GenblazeStudioModalProps> = ({ isOpen
 
   if (!isOpen) return null;
 
-  const modelsByModality: Record<'video' | 'image' | 'audio' | 'upscale', Array<{ id: string; name: string }>> = {
+  const modelsByModality: Record<'video' | 'image' | 'audio', Array<{ id: string; name: string }>> = {
     video: [
       { id: 'Kling-Image2Video-V2.1-Master', name: 'GMI Cloud: Kling Image-to-Video v2.1 Master' },
       { id: 'veo-2.0-generate', name: 'Google: Veo 2.0 Cinematic Video' },
@@ -36,12 +36,9 @@ export const GenblazeStudioModal: React.FC<GenblazeStudioModalProps> = ({ isOpen
       { id: 'stable-audio-pro', name: 'Stability AI: Stable Audio 2.0' },
       { id: 'elevenlabs-multilingual-v2', name: 'Replicate: ElevenLabs Voiceover HD' },
     ],
-    upscale: [
-      { id: 'nightmareai/real-esrgan', name: 'Replicate: Real-ESRGAN 4x Video & Image Upscaler' },
-    ],
   };
 
-  const handleModalityChange = (newMod: 'video' | 'image' | 'audio' | 'upscale') => {
+  const handleModalityChange = (newMod: 'video' | 'image' | 'audio') => {
     setModality(newMod);
     setModelName(modelsByModality[newMod][0].id);
     if (newMod !== 'video') setChain(false);
@@ -127,7 +124,7 @@ export const GenblazeStudioModal: React.FC<GenblazeStudioModalProps> = ({ isOpen
         </div>
 
         <div className={styles.modalityTabs}>
-          {(['video', 'image', 'audio', 'upscale'] as const).map((mod) => (
+          {(['video', 'image', 'audio'] as const).map((mod) => (
             <button
               key={mod}
               type="button"
@@ -135,7 +132,7 @@ export const GenblazeStudioModal: React.FC<GenblazeStudioModalProps> = ({ isOpen
               onClick={() => handleModalityChange(mod)}
               disabled={isGenerating}
             >
-              <span>{mod === 'video' ? '🎬 Video' : mod === 'image' ? '🎨 Image' : mod === 'audio' ? '🎵 Audio & TTS' : '✨ Upscale'}</span>
+              <span>{mod === 'video' ? '🎬 Video' : mod === 'image' ? '🎨 Image' : '🎵 Audio & TTS'}</span>
             </button>
           ))}
         </div>

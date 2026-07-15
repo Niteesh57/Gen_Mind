@@ -38,7 +38,8 @@ export interface TimelineClip {
 export interface TimelineTrack {
   id: string;
   name: string;
-  type: 'video' | 'audio' | 'text';
+  type: 'video' | 'audio' | 'text' | 'image' | 'layer';
+  lockedType?: 'video' | 'audio' | 'image' | null;
   isMuted?: boolean;
   isLocked?: boolean;
   clips: TimelineClip[];
@@ -81,15 +82,17 @@ export class RealBackendEditorService implements IEditorService {
   async getTimelineTracks(): Promise<TimelineTrack[]> {
     return [
       {
-        id: 'default_video',
-        name: 'Video 1',
-        type: 'video',
+        id: 'layer_1',
+        name: 'Layer 1',
+        type: 'layer',
+        lockedType: null,
         clips: [],
       },
       {
-        id: 'default_audio',
-        name: 'Audio 1',
-        type: 'audio',
+        id: 'layer_2',
+        name: 'Layer 2',
+        type: 'layer',
+        lockedType: null,
         clips: [],
       },
     ];
