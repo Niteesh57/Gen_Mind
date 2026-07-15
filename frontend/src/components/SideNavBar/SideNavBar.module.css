@@ -1,0 +1,128 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: var(--sidebar-width);
+  border-right: 1px solid var(--outline-variant);
+  background: var(--surface-container-low);
+  flex-shrink: 0;
+  z-index: 40;
+}
+
+.header {
+  padding: 16px;
+  border-bottom: 1px solid var(--outline-variant);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.thumbnail {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--outline-variant);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+}
+
+.projectInfo {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.projectName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.projectMeta {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tabsContainer {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tabItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tabItem:hover {
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+}
+
+.tabItemActive {
+  background: rgba(53, 37, 205, 0.1);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.importWrapper {
+  margin-top: 16px;
+  padding: 0 8px;
+}
+
+.importButton {
+  width: 100%;
+  border: 1px solid var(--outline-variant);
+  background: transparent;
+  color: var(--on-surface);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.importButton:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(53, 37, 205, 0.04);
+}
+
+.footer {
+  padding: 8px;
+  border-top: 1px solid var(--outline-variant);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

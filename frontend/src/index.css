@@ -1,8 +1,52 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
 
 :root {
+  /* StudioPro Light Theme Palette */
+  --surface: #f9f9ff;
+  --surface-dim: #d3daef;
+  --surface-bright: #f9f9ff;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f1f3ff;
+  --surface-container: #e9edff;
+  --surface-container-high: #e1e8fd;
+  --surface-container-highest: #dce2f7;
+  --on-surface: #141b2b;
+  --on-surface-variant: #464555;
+  --inverse-surface: #293040;
+  --inverse-on-surface: #edf0ff;
+  --outline: #777587;
+  --outline-variant: #c7c4d8;
+  --surface-tint: #4d44e3;
+  --primary: #3525cd;
+  --on-primary: #ffffff;
+  --primary-container: #4f46e5;
+  --on-primary-container: #dad7ff;
+  --inverse-primary: #c3c0ff;
+  --secondary: #5c5f60;
+  --on-secondary: #ffffff;
+  --secondary-container: #e1e3e4;
+  --on-secondary-container: #626566;
+  --tertiary: #45484c;
+  --on-tertiary: #ffffff;
+  --tertiary-container: #5d6064;
+  --on-tertiary-container: #d9dbdf;
+  --error: #ba1a1a;
+  --on-error: #ffffff;
+  --error-container: #ffdad6;
+  --on-error-container: #93000a;
+  --background: #f9f9ff;
+  --on-background: #141b2b;
+  --surface-variant: #dce2f7;
+
+  /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  color-scheme: dark;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Layout Constants */
+  --sidebar-width: 280px;
+  --timeline-track-height: 48px;
+
+  color-scheme: light;
 }
 
 * {
@@ -13,29 +57,31 @@
 
 body {
   font-family: var(--font-sans);
-  background-color: #090a0f;
-  color: #f3f4f6;
+  background-color: var(--background);
+  color: var(--on-surface);
   min-height: 100vh;
-  overflow-x: hidden;
+  width: 100vw;
+  overflow: hidden;
+  user-select: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom Scrollbar for premium feel */
+/* Custom Slim Scrollbars for professional software feel */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #090a0f;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e2030;
-  border-radius: 4px;
+  background: var(--outline-variant);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #313552;
+  background: var(--outline);
 }
