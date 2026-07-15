@@ -1,14 +1,47 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useEditor } from '../../context/EditorContext';
+import { type MediaAsset } from '../../services/editorService';
 import styles from './Timeline.module.css';
 
 export const Timeline: React.FC = () => {
-  const { timelineTracks, activeTool, setActiveTool, playheadPx, setPlayheadPx } = useEditor();
+  const { timelineTracks, activeTool, setActiveTool, playheadPx, setPlayheadPx, addClipToTrack } = useEditor();
+  const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
 
   const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left + e.currentTarget.scrollLeft;
     setPlayheadPx(Math.max(0, Math.min(1800, clickX)));
+  };
+
+  const handleDragOverTrack = (e: React.DragEvent<HTMLDivElement>, trackId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    if (dragOverTrackId !== trackId) {
+      setDragOverTrackId(trackId);
+    }
+  };
+
+  const handleDragLeaveTrack = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTrackId(null);
+  };
+
+  const handleDropOnTrack = (e: React.DragEvent<HTMLDivElement>, trackId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTrackId(null);
+
+    try {
+      const dataStr = e.dataTransfer.getData('application/json');
+      if (dataStr) {
+        const asset: MediaAsset = JSON.parse(dataStr);
+        addClipToTrack(trackId, asset);
+      }
+    } catch (err) {
+      console.error('Failed to parse dropped media asset', err);
+    }
   };
 
   const ticks = ['00:00', '00:10', '00:20', '00:30', '00:40', '00:50', '01:00', '01:10', '01:20', '01:30', '01:40', '01:50', '02:00'];
@@ -119,7 +152,14 @@ export const Timeline: React.FC = () => {
             </div>
 
             {timelineTracks.map((track) => (
-              <div key={track.id} className={styles.trackRow}>
+              <div
+                key={track.id}
+                className={styles.trackRow}
+                style={dragOverTrackId === track.id ? { backgroundColor: 'rgba(53, 37, 205, 0.15)', outline: '1px dashed var(--primary)' } : {}}
+                onDragOver={(e) => handleDragOverTrack(e, track.id)}
+                onDragLeave={handleDragLeaveTrack}
+                onDrop={(e) => handleDropOnTrack(e, track.id)}
+              >
                 {track.clips.map((clip) => {
                   if (clip.type === 'text') {
                     return (
@@ -127,7 +167,7 @@ export const Timeline: React.FC = () => {
                         key={clip.id}
                         className={styles.clipText}
                         style={{ left: `${clip.startOffsetPx}px`, width: `${clip.widthPx}px` }}
-                        onClick={() => alert(`Title clip selected: ${clip.title} (${clip.subTitle})`)}
+                        onClick={() => alert(`Title clip selected: ${clip.title} (${clip.subTitle || 'Title'})`)}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <path d="M4 7V4h16v3M9 20h6M12 4v16" />

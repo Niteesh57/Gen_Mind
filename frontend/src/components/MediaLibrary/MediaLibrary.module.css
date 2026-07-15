@@ -14,10 +14,17 @@
   padding: 12px;
   border-bottom: 1px solid var(--outline-variant);
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
   background: var(--surface-container-high);
 }
+
+.headerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 
 .filters {
   display: flex;
@@ -51,6 +58,11 @@
   flex: 1;
   overflow-y: auto;
   padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardsContainer {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
@@ -64,11 +76,16 @@
   border-radius: 6px;
   border: 1px solid var(--outline-variant);
   overflow: hidden;
-  cursor: pointer;
+  cursor: grab;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.card:active {
+  cursor: grabbing;
+  transform: scale(0.97);
 }
 
 .card:hover {
@@ -131,6 +148,24 @@
   align-items: center;
   gap: 4px;
   z-index: 2;
+}
+
+.shaBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(13, 17, 28, 0.9);
+  border: 1px solid rgba(53, 37, 205, 0.8);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #c3c0ff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  z-index: 3;
 }
 
 .audioPreview {

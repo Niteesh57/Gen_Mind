@@ -1,0 +1,37 @@
+{
+  "run_id": "run_89d50d831b95",
+  "project_id": "test_proj_001",
+  "provider": "GMICloudVideoProvider (Kling/Veo/Wan)",
+  "model": "Kling-Image2Video-V2.1-Master",
+  "prompt": "Cinematic neon cyberpunk street in dense fog at sunset",
+  "modality": "video",
+  "timestamp": "2026-07-15T07:11:39.585256Z",
+  "parent_run_id": "manifest_69ecc02e",
+  "asset_url": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1000&auto=format&fit=crop&q=80",
+  "b2_stored_url": "http://localhost:8000/static/b2_assets/5f4fe7e8c2_genblaze_video_3a00e4a3.mp4",
+  "sha256": "5f4fe7e8c2301738dbac2c48e956c9d7a815a714f5233dc4bb535731065b7428",
+  "steps_executed": [
+    {
+      "step_index": 1,
+      "modality": "image",
+      "provider": "GMICloudImageProvider",
+      "model": "seedream-5.0-lite",
+      "action": "Storyboard Keyframe Generation",
+      "asset_url": "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=1000&auto=format&fit=crop&q=80",
+      "sha256": "69ecc02ef3e53f86033a8ef245e05b26cdfa089b329f6509b9f5ec6a270ee843",
+      "status": "COMPLETED (Chain Anchor Locked)"
+    },
+    {
+      "step_index": 2,
+      "modality": "video",
+      "provider": "GMICloudVideoProvider (Kling/Veo/Wan)",
+      "model": "Kling-Image2Video-V2.1-Master",
+      "action": "Primary AI Inference & Render",
+      "asset_url": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1000&auto=format&fit=crop&q=80",
+      "sha256": "5f4fe7e8c2301738dbac2c48e956c9d7a815a714f5233dc4bb535731065b7428",
+      "status": "COMPLETED (Object Lock Stored in B2)"
+    }
+  ],
+  "storage_sink": "Backblaze B2 Object Lock Bucket (`genblaze-studio-bucket`)",
+  "verified": true
+}

@@ -1,0 +1,83 @@
+.dropzone {
+  border: 2px dashed var(--outline-variant);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 16px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.dropzone:hover {
+  border-color: var(--primary);
+  background: var(--surface-container-low);
+}
+
+.dropzoneActive {
+  border-color: var(--primary);
+  background: rgba(53, 37, 205, 0.08);
+  transform: scale(1.01);
+}
+
+.iconWrapper {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(53, 37, 205, 0.1);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.textMain {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.textSub {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+}
+
+.browseSpan {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.b2Badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-container-high);
+  border: 1px solid var(--outline-variant);
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  margin-top: 4px;
+}
+
+.uploadingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(249, 249, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  z-index: 5;
+}

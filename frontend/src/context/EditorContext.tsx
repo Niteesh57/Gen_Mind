@@ -5,6 +5,7 @@ import {
   type ProjectMetadata,
   type MediaAsset,
   type TimelineTrack,
+  type TimelineClip,
 } from '../services/editorService';
 
 interface EditorContextType {
@@ -25,6 +26,7 @@ interface EditorContextType {
   timelineTracks: TimelineTrack[];
   reloadAssets: () => Promise<void>;
   resetProject: () => void;
+  addClipToTrack: (trackIdOrName: string, asset: MediaAsset) => void;
 }
 
 const EditorContext = createContext<EditorContextType | null>(null);
@@ -64,7 +66,6 @@ export const EditorProvider: React.FC<EditorProviderProps> = ({ children, servic
     }
   }, [project, reloadAssets]);
 
-  // Simulate playback loop scrubbing playhead forward
   useEffect(() => {
     if (!isPlaying) return;
     const interval = setInterval(() => {
@@ -77,6 +78,38 @@ export const EditorProvider: React.FC<EditorProviderProps> = ({ children, servic
     setIsPlaying(false);
     setProject(null);
   }, []);
+
+  const addClipToTrack = useCallback((trackIdOrName: string, asset: MediaAsset) => {
+    setTimelineTracks((prevTracks) =>
+      prevTracks.map((track) => {
+        if (track.id !== trackIdOrName && track.name !== trackIdOrName) {
+          // If inserting audio into video track or vice-versa, pick matching track type
+          if (asset.type === 'audio' && track.type === 'audio' && trackIdOrName === 'default_audio') {
+            // fall through to insert
+          } else if (asset.type !== 'audio' && track.type === 'video' && trackIdOrName === 'default_video') {
+            // fall through to insert
+          } else {
+            return track;
+          }
+        }
+
+        const newClip: TimelineClip = {
+          id: `clip_drag_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          title: asset.name,
+          type: asset.type === 'audio' ? 'audio' : 'video',
+          startOffsetPx: playheadPx,
+          widthPx: (asset.durationSeconds || 8) * 20,
+          thumbnailUrl: asset.thumbnailUrl,
+          isSelected: true,
+        };
+
+        return {
+          ...track,
+          clips: [...track.clips.map((c) => ({ ...c, isSelected: false })), newClip],
+        };
+      })
+    );
+  }, [playheadPx]);
 
   return (
     <EditorContext.Provider
@@ -98,6 +131,7 @@ export const EditorProvider: React.FC<EditorProviderProps> = ({ children, servic
         timelineTracks,
         reloadAssets,
         resetProject,
+        addClipToTrack,
       }}
     >
       {children}
