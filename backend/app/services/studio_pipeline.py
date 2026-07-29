@@ -1,4 +1,4 @@
-"""Brief-driven media pipeline for 5-15 image continuous Video Explanations using z-image-turbo & Qwen3.5-Flash."""
+"""Brief-driven media pipeline using official genblaze PyPI SDK (SyncProvider & Pipeline) reading configuration dynamically from .env without external openai dependency."""
 from __future__ import annotations
 
 import asyncio
@@ -13,15 +13,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import edge_tts
-from openai import OpenAI
+from dotenv import load_dotenv
 from PIL import Image, ImageDraw
 from moviepy import AudioFileClip, ImageClip, concatenate_audioclips, concatenate_videoclips
 
+from genblaze import Asset, Modality, Pipeline, Step
+from genblaze_core.providers.base import ProviderCapabilities, SyncProvider
+from genblaze_core.runnable.config import RunnableConfig
 from app.core.media_interfaces import IStorageBackend
 
-DEFAULT_DASHSCOPE_KEY = "sk-ws-H.XEPHHX.yJ6F.MEQCIGBqUnDCfr2aS4ta3m7f7Yr35KZFQ9b9E36nxa58ZpqRAiALWC1NzT8PC_XCXj2vZOdhVIjfswhXNRkNXp78FHGyGg"
-DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-DASHSCOPE_IMAGE_URL = "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+# Load .env configuration
+base_dir = Path(__file__).resolve().parent.parent.parent
+env_path = base_dir / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 AZURE_VOICES = [
     {"id": "en-US-JennyNeural", "label": "Jenny — US English (Female)", "language": "en-US"},
@@ -38,45 +43,69 @@ AZURE_VOICES = [
 
 class ProviderUnavailable(RuntimeError): pass
 
-def _get_qwen_client() -> OpenAI:
-    api_key = os.getenv("DASHSCOPE_API_KEY", DEFAULT_DASHSCOPE_KEY)
-    return OpenAI(api_key=api_key, base_url=DASHSCOPE_BASE_URL)
+class DashScopeGenblazeProvider(SyncProvider):
+    """Native GenBlaze SyncProvider adapter reading API key, model, and widescreen parameters from .env without openai dependency."""
+    name = "dashscope_provider"
+    capabilities = ProviderCapabilities(supported_modalities=[Modality.TEXT, Modality.IMAGE])
 
-def _generate_z_image_turbo(prompt: str) -> Optional[bytes]:
-    """Generates an image via DashScope z-image-turbo multimodal API."""
-    api_key = os.getenv("DASHSCOPE_API_KEY", DEFAULT_DASHSCOPE_KEY)
-    payload = {
-        "model": "z-image-turbo",
-        "input": {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [{"text": prompt[:1200]}]
-                }
-            ]
-        },
-        "parameters": {
-            "prompt_extend": False,
-            "size": "1024*1024"
-        }
-    }
-    req = urllib.request.Request(
-        DASHSCOPE_IMAGE_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        },
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=40) as resp:
-            res = json.loads(resp.read().decode("utf-8"))
-        img_url = res["output"]["choices"][0]["message"]["content"][0]["image"]
-        with urllib.request.urlopen(img_url, timeout=25) as img_resp:
-            return img_resp.read()
-    except Exception:
-        return None
+    def generate(self, step: Step, config: RunnableConfig | None = None) -> Step:
+        api_key = os.getenv("DASHSCOPE_API_KEY", "")
+        base_url = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+        image_url = os.getenv("DASHSCOPE_IMAGE_URL", "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation")
+        text_model = os.getenv("DASHSCOPE_TEXT_MODEL", "qwen3.5-flash")
+        image_model = os.getenv("DASHSCOPE_IMAGE_MODEL", "z-image-turbo")
+        image_size = os.getenv("DASHSCOPE_IMAGE_SIZE", "1280*720")
+
+        if step.modality == Modality.TEXT:
+            model_name = step.model if step.model and step.model != "default" else text_model
+            chat_url = f"{base_url.rstrip('/')}/chat/completions"
+            payload = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": step.prompt}]
+            }
+            req = urllib.request.Request(
+                chat_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                text = data["choices"][0]["message"]["content"]
+                step.metadata["output_text"] = text
+                step.assets.append(Asset(url="", media_type="text/plain"))
+            except Exception as exc:
+                step.metadata["output_text"] = ""
+                step.metadata["error"] = str(exc)
+        elif step.modality == Modality.IMAGE:
+            payload = {
+                "model": image_model,
+                "input": {"messages": [{"role": "user", "content": [{"text": step.prompt[:1200]}]}]},
+                "parameters": {"prompt_extend": False, "size": image_size} # 16:9 PC Widescreen from .env
+            }
+            req = urllib.request.Request(
+                image_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                img_url = data["output"]["choices"][0]["message"]["content"][0]["image"]
+                img_req = urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(img_req, timeout=30) as img_resp:
+                    img_bytes = img_resp.read()
+                # Store base64 encoded string in metadata so genblaze_core canonical hash won't crash on bytes
+                import base64
+                step.metadata["img_b64"] = base64.b64encode(img_bytes).decode("utf-8")
+                step.metadata["img_url"] = img_url
+                step.assets.append(Asset(url=img_url, media_type="image/png"))
+            except Exception as exc:
+                step.metadata["img_b64"] = None
+                step.metadata["error"] = str(exc)
+        return step
 
 class EdgeTtsSpeechAgent:
     """Free Microsoft Edge neural voice synthesis."""
@@ -115,6 +144,7 @@ class LearningStudioPipeline:
     def __init__(self, storage: IStorageBackend):
         self.storage = storage
         self.speech = EdgeTtsSpeechAgent()
+        self.dashscope_provider = DashScopeGenblazeProvider()
 
     @staticmethod
     def _render_styled_frame(title: str, text: str, index: int, total: int, style: str, topic: str) -> bytes:
@@ -164,7 +194,7 @@ class LearningStudioPipeline:
             draw.text((90, y_pos), line, fill=text_dark)
             y_pos += 36
 
-        draw.text((90, 630), "Synthesized via z-image-turbo & Microsoft Neural Voice", fill=sub_text)
+        draw.text((90, 630), "Synthesized via official genblaze PyPI SDK (16:9 PC Widescreen)", fill=sub_text)
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
@@ -173,6 +203,7 @@ class LearningStudioPipeline:
     def _build_script(self, brief: StudioBrief) -> List[Dict[str, Any]]:
         sources_text = "\n".join(brief.source_context or [])
         clean_context = sources_text[:6000] if sources_text else brief.topic
+        text_model = os.getenv("DASHSCOPE_TEXT_MODEL", "qwen3.5-flash")
 
         if brief.output_mode == "conversation":
             speaker_voices = brief.participant_voices or [
@@ -180,23 +211,18 @@ class LearningStudioPipeline:
             ][:brief.participant_count]
 
             try:
-                client = _get_qwen_client()
+                p = Pipeline("script_generation")
                 prompt = (
                     f"Create a natural {brief.podcast_tone} audio podcast script about '{brief.topic}' "
                     f"with {brief.participant_count} speaker(s).\n"
-                    "Use the following source text as background context:\n"
-                    f"{clean_context}\n\n"
-                    "Return JSON ONLY: an array of JSON objects representing turns in sequence. "
-                    "Each turn object MUST have:\n"
+                    f"Background context:\n{clean_context}\n\n"
+                    "Return JSON ONLY: an array of objects. Each object MUST have:\n"
                     '{"index": int, "speaker_index": int (0 to N-1), "speaker_name": string, "narration": string}\n'
                     "Generate 8 to 14 engaging, continuous dialogue turns."
                 )
-                res = client.chat.completions.create(
-                    model="qwen3.5-flash",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7
-                )
-                raw = res.choices[0].message.content or ""
+                p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
+                res = p.run(raise_on_failure=False)
+                raw = res.run.steps[0].metadata.get("output_text", "")
                 clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
                 clean_json = re.sub(r"```$", "", clean_json).strip()
                 parsed = json.loads(clean_json)
@@ -236,22 +262,18 @@ class LearningStudioPipeline:
             # VIDEO EXPLANATION MODE (5 to 15 Images)
             count = max(5, min(15, brief.image_count))
             try:
-                client = _get_qwen_client()
+                p = Pipeline("video_script_gen")
                 prompt = (
                     f"Create an educational script for a {count}-scene video explanation about '{brief.topic}'.\n"
-                    "Use the following source text as ground truth:\n"
-                    f"{clean_context}\n\n"
+                    f"Background context:\n{clean_context}\n\n"
                     f"Return JSON ONLY: an array of exactly {count} scene objects in sequence. "
                     "Each scene object MUST have:\n"
                     '{"index": int (1 to N), "title": string, "narration": string}\n'
                     "Keep narration informative, engaging, and clear."
                 )
-                res = client.chat.completions.create(
-                    model="qwen3.5-flash",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.6
-                )
-                raw = res.choices[0].message.content or ""
+                p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
+                res = p.run(raise_on_failure=False)
+                raw = res.run.steps[0].metadata.get("output_text", "")
                 clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
                 clean_json = re.sub(r"```$", "", clean_json).strip()
                 parsed = json.loads(clean_json)
@@ -279,8 +301,9 @@ class LearningStudioPipeline:
             return scenes
 
     def run(self, brief: StudioBrief) -> Dict[str, Any]:
-        stages = ["Sources ingested", "Qwen3.5-Flash script generated"]
+        stages = ["Sources ingested", "GenBlaze Pipeline initialized from .env"]
         items = self._build_script(brief)
+        image_model = os.getenv("DASHSCOPE_IMAGE_MODEL", "z-image-turbo")
 
         if brief.output_mode == "conversation":
             voice_tracks = []
@@ -343,7 +366,7 @@ class LearningStudioPipeline:
             }
 
         else:
-            # VIDEO EXPLANATION PIPELINE (z-image-turbo AI Images + Edge TTS)
+            # VIDEO EXPLANATION PIPELINE (GenBlaze 16:9 PC Widescreen z-image-turbo AI Images)
             images_meta = []
             video_clips = []
             temp_files = []
@@ -353,10 +376,20 @@ class LearningStudioPipeline:
                 narration = scene["narration"]
                 title = scene["title"]
 
-                # Prompt z-image-turbo for real AI generated image
-                prompt_text = f"{title}: {narration}. Visual style: {brief.image_style}. High detail, clean framing."
-                img_bytes = _generate_z_image_turbo(prompt_text)
-                image_source = "DashScope z-image-turbo"
+                prompt_text = f"{title}: {narration}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed."
+                img_bytes = None
+                image_source = f"GenBlaze Pipeline ({image_model} 16:9 Widescreen)"
+
+                try:
+                    import base64
+                    img_p = Pipeline("image_gen_step")
+                    img_p.step(self.dashscope_provider, model=image_model, prompt=prompt_text, modality=Modality.IMAGE)
+                    img_res = img_p.run(raise_on_failure=False)
+                    img_b64 = img_res.run.steps[0].metadata.get("img_b64")
+                    if img_b64:
+                        img_bytes = base64.b64decode(img_b64)
+                except Exception:
+                    img_bytes = None
 
                 if not img_bytes:
                     img_bytes = self._render_styled_frame(title, narration, idx, len(items), brief.image_style, brief.topic)
@@ -389,7 +422,7 @@ class LearningStudioPipeline:
                 final_video = concatenate_videoclips([vc[0] for vc in video_clips])
                 final_video.write_videofile(str(mp4_path), fps=2, logger=None)
                 output_video_url = f"/static/public/{mp4_filename}"
-                stages.append(f"Successfully compiled {len(items)} z-image-turbo AI scene frames into MP4 video")
+                stages.append(f"Successfully compiled {len(items)} GenBlaze 16:9 PC widescreen AI scene frames into MP4 video")
             except Exception as exc:
                 output_video_url = images_meta[0]["url"] if images_meta else None
                 stages.append(f"Video assembly note: {exc}")

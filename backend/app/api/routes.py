@@ -1,8 +1,10 @@
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.repositories.local_storage import LocalStorageBackend
+from app.repositories import session_db
+from app.repositories.session_db import get_session_content
 from app.services.source_intake import SourceIntakeError, SourceIntakeService
 from app.services.studio_pipeline import AZURE_VOICES, LearningStudioPipeline, StudioBrief
 
@@ -15,16 +17,19 @@ _intake = SourceIntakeService(_storage)
 def get_studio() -> LearningStudioPipeline: return _studio
 def get_intake() -> SourceIntakeService: return _intake
 
+# ─── Pydantic Models ──────────────────────────────────────────────────────────
+
 class StudioGenerateRequest(BaseModel):
     project_id: str = "learning_studio"
+    session_id: Optional[str] = None
     topic: str
-    image_count: int = 10  # Range 5 to 15
+    image_count: int = 10
     image_style: str = "Clean Editorial"
     language: str = "en-US"
     output_mode: Literal["video", "conversation"] = "video"
     voice: str = "en-US-JennyNeural"
     podcast_tone: Literal["friendly", "serious", "deep_dive"] = "friendly"
-    participant_count: int = 2  # Range 1 to 4 speakers
+    participant_count: int = 2
     participant_voices: List[str] = []
     source_urls: List[str] = []
     source_assets: List[str] = []
@@ -33,16 +38,70 @@ class StudioGenerateRequest(BaseModel):
 class SourceInspectRequest(BaseModel):
     urls: List[str]
     deep_research: bool = False
+    session_id: Optional[str] = None
+
+class SessionCreateRequest(BaseModel):
+    device_id: str
+    title: str = "New Media"
+    mode: str = "video"
+
+class SessionUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    mode: Optional[str] = None
+
+# ─── Studio Voices ────────────────────────────────────────────────────────────
 
 @router.get("/studio/voices")
 def list_studio_voices() -> List[Dict[str, str]]:
     return AZURE_VOICES
 
+# ─── Sessions CRUD ────────────────────────────────────────────────────────────
+
+@router.post("/sessions")
+def create_session(req: SessionCreateRequest) -> Dict[str, Any]:
+    return session_db.create_session(req.device_id, req.title, req.mode)
+
+@router.get("/sessions")
+def list_sessions(device_id: str) -> List[Dict[str, Any]]:
+    if not device_id:
+        raise HTTPException(status_code=422, detail="device_id is required.")
+    return session_db.list_sessions(device_id)
+
+@router.get("/sessions/{session_id}")
+def get_session(session_id: str) -> Dict[str, Any]:
+    s = session_db.get_session(session_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    s["sources"] = session_db.get_session_sources(session_id)
+    return s
+
+@router.patch("/sessions/{session_id}")
+def update_session(session_id: str, req: SessionUpdateRequest) -> Dict[str, Any]:
+    updates = req.model_dump(exclude_none=True)
+    result = session_db.update_session(session_id, **updates)
+    if not result:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return result
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str) -> Dict[str, Any]:
+    ok = session_db.delete_session(session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return {"deleted": session_id}
+
+# ─── Sources ──────────────────────────────────────────────────────────────────
+
 @router.post("/studio/sources/inspect")
 def inspect_sources(req: SourceInspectRequest, intake: SourceIntakeService = Depends(get_intake)) -> List[Dict[str, Any]]:
     if not 1 <= len(req.urls) <= 10:
         raise HTTPException(status_code=422, detail="Provide between 1 and 10 source URLs.")
-    return intake.inspect_urls(req.urls, deep_research=req.deep_research)
+    results = intake.inspect_urls(req.urls, deep_research=req.deep_research)
+    if req.session_id:
+        ready = [s for s in results if s.get("status") == "ready"]
+        if ready:
+            session_db.add_session_sources(req.session_id, ready)
+    return results
 
 @router.post("/studio/sources/upload")
 async def upload_source_document(file: UploadFile = File(...), intake: SourceIntakeService = Depends(get_intake)) -> Dict[str, Any]:
@@ -52,6 +111,8 @@ async def upload_source_document(file: UploadFile = File(...), intake: SourceInt
     except SourceIntakeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+# ─── Studio Generate ──────────────────────────────────────────────────────────
+
 @router.post("/studio/generate")
 def generate_learning_media(req: StudioGenerateRequest, studio: LearningStudioPipeline = Depends(get_studio)) -> Dict[str, Any]:
     if req.output_mode == "video" and not 5 <= req.image_count <= 15:
@@ -59,5 +120,26 @@ def generate_learning_media(req: StudioGenerateRequest, studio: LearningStudioPi
     if req.output_mode == "conversation" and not 1 <= req.participant_count <= 4:
         raise HTTPException(status_code=422, detail="Podcast audio requires between 1 and 4 participants.")
 
-    brief_data = req.model_dump()
-    return studio.run(StudioBrief(**brief_data))
+    # Use full accumulated session content as the knowledge base when available
+    source_context = req.source_context
+    if req.session_id:
+        full_content = get_session_content(req.session_id)
+        if full_content.strip():
+            source_context = [full_content]
+
+    brief_data = req.model_dump(exclude={"session_id"})
+    brief_data["source_context"] = source_context
+    result = studio.run(StudioBrief(**brief_data))
+
+    # Persist to SQLite session if session_id provided
+    if req.session_id:
+        session_db.update_session(req.session_id, title=req.topic, mode=req.output_mode)
+        session_db.save_session_output(
+            session_id=req.session_id,
+            output_mode=result.get("mode", req.output_mode),
+            output_url=result.get("output_url", ""),
+            narration=result.get("narration", ""),
+            stages=result.get("stages", [])
+        )
+
+    return result

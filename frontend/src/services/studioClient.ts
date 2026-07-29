@@ -14,7 +14,7 @@ export interface LearningMediaResult {
   brief: any;
   mode: 'video' | 'conversation';
   scenes?: any[];
-  turns?: any[];
+  turns?: Array<{ index: number; speaker_name?: string; narration: string; voice?: string }>;
   images?: Array<{ index: number; title: string; url: string }>;
   voice_tracks?: Array<{ index: number; speaker: string; voice: string; narration: string; url: string }>;
   output_url: string | null;
@@ -24,6 +24,7 @@ export interface LearningMediaResult {
 
 export interface LearningMediaPayload {
   project_id: string;
+  session_id?: string;
   topic: string;
   image_count: number; // 5 to 15
   image_style: string;
@@ -40,20 +41,24 @@ export interface LearningMediaPayload {
 
 export interface StudioSource {
   id: string;
-  kind: 'url' | 'document';
+  kind: 'url' | 'document' | 'pdf' | 'word' | 'ppt';
   mode?: 'normal' | 'deep';
   name: string;
   headline?: string;
   overview?: string;
   source_url?: string;
+  favicon_url?: string;
   archive_url: string;
   excerpt: string;
   content: string;
   word_count?: number;
   deep_pages?: string[];
+  is_subpage?: boolean;
+  parent_url?: string | null;
   status: 'ready' | 'error';
   error?: string;
 }
+
 
 export const getStudioVoices = async (): Promise<StudioVoice[]> => {
   const res = await fetch(`${API_BASE_URL}/studio/voices`);
@@ -74,11 +79,11 @@ export const generateLearningMedia = async (payload: LearningMediaPayload): Prom
   return res.json();
 };
 
-export const inspectStudioSources = async (urls: string[], deepResearch: boolean = false): Promise<StudioSource[]> => {
+export const inspectStudioSources = async (urls: string[], deepResearch: boolean = false, sessionId?: string): Promise<StudioSource[]> => {
   const res = await fetch(`${API_BASE_URL}/studio/sources/inspect`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls, deep_research: deepResearch }),
+    body: JSON.stringify({ urls, deep_research: deepResearch, session_id: sessionId }),
   });
   if (!res.ok) throw await apiError(res, 'inspect source URLs');
   return res.json();
