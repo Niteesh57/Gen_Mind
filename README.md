@@ -26,39 +26,78 @@
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    subgraph Frontend["React Frontend (Vite Studio UI)"]
+        UI_Sources["Source Intake (URLs, PDFs, Images)"]
+        UI_Studio["Studio Controls (Mode, Voice, Style)"]
+        UI_Player["Media Player & Synchronized Transcript"]
+    end
+
+    subgraph Backend["FastAPI Backend Engine"]
+        Intake["Source Intake Service"]
+        DB[(SQLite Session DB)]
+        
+        subgraph GenBlaze["GenBlaze Orchestration Engine (v0.4.5)"]
+            Pipeline["GenBlaze Pipeline & Steps"]
+            Provider["DashScope SyncProvider Adapter"]
+            Manifest["GenBlaze Provenance Manifest"]
+        end
+
+        Speech["Edge TTS Neural Speech Engine"]
+        MoviePy["MoviePy Video Assembly Engine"]
+    end
+
+    subgraph AI_Cloud["External AI Services"]
+        Qwen_Text["DashScope Text (qwen3.5-flash)"]
+        Qwen_Img["DashScope Multi-Modal (qwen-image-2.0)"]
+    end
+
+    subgraph B2_Storage["Backblaze B2 Private Cloud Storage"]
+        S3Backend["genblaze_s3 S3StorageBackend"]
+        B2_Videos["videos/ (MP4 Video Explanations)"]
+        B2_Audio["audio/ (MP3 Podcast Episodes)"]
+        B2_Images["images/ (PNG Scene Frames)"]
+        B2_Manifests["manifests/ (GenBlaze Provenance JSON)"]
+    end
+
+    UI_Sources --> Intake --> DB
+    UI_Studio --> Pipeline
+    Pipeline --> Provider
+    Provider --> Qwen_Text & Qwen_Img
+    Pipeline --> Speech
+    Pipeline --> MoviePy
+    Pipeline --> Manifest
+    
+    Backend --> S3Backend
+    S3Backend --> B2_Videos & B2_Audio & B2_Images & B2_Manifests
+    B2_Storage -- Presigned URLs --> UI_Player
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Gen_Mind Studio                          │
-│                                                                 │
-│  React Frontend (Vite)                                          │
-│  ┌────────────┐  ┌──────────────────┐  ┌───────────────────┐  │
-│  │  Sources   │  │  Studio Options  │  │  Media History    │  │
-│  │  Sidebar   │  │  (depth, mode,   │  │  (session-scoped) │  │
-│  │            │  │   voice, style)  │  │  + Provenance     │  │
-│  └────────────┘  └──────────────────┘  └───────────────────┘  │
-│                                                                 │
-│  FastAPI Backend                                                │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  SourceIntakeService     LearningStudioPipeline          │  │
-│  │  (URL/PDF/Image intake)  (GenBlaze Pipeline + Steps)     │  │
-│  │                                                          │  │
-│  │  GenBlaze SDK v0.4.5                                     │  │
-│  │  ├── Pipeline + Step orchestration                       │  │
-│  │  ├── SyncProvider (DashScope/Qwen text + image)          │  │
-│  │  ├── Manifest provenance tracking                        │  │
-│  │  └── genblaze-s3 S3StorageBackend → Backblaze B2         │  │
-│  │                                                          │  │
-│  │  Edge TTS (Microsoft Neural Voices)                      │  │
-│  │  MoviePy (video assembly)                                │  │
-│  │  SQLite (session persistence)                            │  │
-│  └─────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  Backblaze B2 (Private Bucket)                                  │
-│  ├── videos/     → MP4 video explanations                       │
-│  ├── audio/      → MP3 podcast episodes                         │
-│  ├── images/     → AI-generated scene frames (PNG)              │
-│  └── manifests/  → GenBlaze provenance JSON                     │
-└─────────────────────────────────────────────────────────────────┘
+
+### System Data Flow
+
+```
+[ User Sources: URLs / PDFs / Images ]
+                 │
+                 ▼
+[ Source Intake Service ] ──► [ SQLite Session Knowledge Base ]
+                 │
+                 ▼
+[ GenBlaze Pipeline Execution ]
+   ├── Step 1: Text Scripting ──► DashScope qwen3.5-flash
+   ├── Step 2: Multi-Modal Scene Synthesis ──► DashScope qwen-image-2.0 / z-image-turbo
+   ├── Step 3: Neural Voice Synthesis ──► Microsoft Edge TTS
+   └── Step 4: Video Compilation ──► MoviePy (16:9 MP4)
+                 │
+                 ▼
+[ GenBlaze Manifest Provenance ] ──► Generated for every run
+                 │
+                 ▼
+[ genblaze_s3 S3StorageBackend ] ──► Private Backblaze B2 Cloud Bucket
+   ├── videos/     (MP4)
+   ├── audio/      (MP3)
+   ├── images/     (PNG)
+   └── manifests/  (GenBlaze Manifest JSON)
 ```
 
 ---
