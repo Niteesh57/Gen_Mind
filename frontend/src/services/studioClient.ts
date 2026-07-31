@@ -43,7 +43,7 @@ export interface LearningMediaPayload {
 
 export interface StudioSource {
   id: string;
-  kind: 'url' | 'document' | 'pdf' | 'word' | 'ppt';
+  kind: 'url' | 'document' | 'pdf' | 'word' | 'ppt' | 'image';
   mode?: 'normal' | 'deep';
   name: string;
   headline?: string;
@@ -91,10 +91,20 @@ export const inspectStudioSources = async (urls: string[], deepResearch: boolean
   return res.json();
 };
 
-export const uploadStudioDocument = async (file: File): Promise<StudioSource> => {
+export const uploadStudioDocument = async (file: File, sessionId?: string): Promise<StudioSource> => {
   const form = new FormData();
   form.append('file', file);
+  if (sessionId) form.append('session_id', sessionId);
   const res = await fetch(`${API_BASE_URL}/studio/sources/upload`, { method: 'POST', body: form });
   if (!res.ok) throw await apiError(res, 'upload document');
   return res.json();
+};
+
+export const addSourcesToSession = async (sessionId: string, sources: StudioSource[]): Promise<void> => {
+  if (!sessionId || !sources.length) return;
+  await fetch(`${API_BASE_URL}/studio/sources/add`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, sources }),
+  });
 };

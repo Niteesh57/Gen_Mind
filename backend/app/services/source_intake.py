@@ -60,13 +60,13 @@ def _fetch_url_content(url: str, timeout: int = 10) -> tuple[str, str, List[str]
     req = Request(safe_target, headers={"User-Agent": "GenMindIntake/3.0"})
     with urlopen(req, timeout=timeout) as resp:
         content_type = resp.headers.get_content_type()
-        data = resp.read(2_000_000)
+        data = resp.read(10_000_000)
     if content_type == "text/html":
         raw = data.decode("utf-8", errors="replace")
         return _extract_clean_html(raw)
     else:
         text = data.decode("utf-8", errors="replace")
-        return url, text[:20000], []
+        return url, text[:200000], []
 
 def _favicon_url(page_url: str) -> str:
     """Returns the Google favicon proxy URL for a given page URL."""
@@ -77,37 +77,14 @@ def _favicon_url(page_url: str) -> str:
 def _make_source_id(url: str, index: int, suffix: str = "") -> str:
     return f"url_{index}_{abs(hash(url + suffix))}"
 
-def summarize_content_and_create_headline(text: str) -> tuple[str, str]:
-    """Calls LLM to generate a session headline and overview (50-80 words)."""
+def fast_source_meta(title: str, text: str) -> tuple[str, str]:
+    """Fast, zero-LLM metadata extraction for scraped sources."""
+    clean_title = (title or "").strip()
     words = text.split()
-    if not words:
-        return "New Media Session", "No content extracted."
-    clean_snippet = " ".join(words[:4000])
-    text_model = os.getenv("DASHSCOPE_TEXT_MODEL", "qwen3.5-flash")
-    try:
-        p = Pipeline("summary_pipeline")
-        prompt = (
-            "You are an expert editor for a NotebookLM media app. "
-            "Analyze the text extracted from user sources.\n"
-            "Return JSON ONLY with two keys:\n"
-            '1. "headline": A crisp 4 to 7 word title for this content.\n'
-            '2. "overview": A concise paragraph (50-80 words) describing what this content covers — written as an overview, not a summary.\n\n'
-            f"SOURCE TEXT:\n{clean_snippet}"
-        )
-        p.step(_dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
-        res = p.run(raise_on_failure=False)
-        raw = res.run.steps[0].metadata.get("output_text", "")
-        clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
-        clean_json = re.sub(r"```$", "", clean_json).strip()
-        data = json.loads(clean_json)
-        headline = data.get("headline", "").strip() or " ".join(words[:6]).title()
-        overview = data.get("overview", "").strip() or " ".join(words[:100])
-        return headline[:70], overview[:600]
-    except Exception:
-        first_sentence = [s.strip() for s in re.split(r"[.!?]", clean_snippet) if len(s.strip()) > 10]
-        headline = first_sentence[0][:50].strip() if first_sentence else " ".join(words[:6]).title()
-        overview = " ".join(words[:100]) + ("..." if len(words) > 100 else "")
-        return headline, overview
+    if not clean_title or clean_title == "Web Document":
+        clean_title = " ".join(words[:6]).title() if words else "Source Document"
+    overview = " ".join(words[:35]) + ("..." if len(words) > 35 else "")
+    return clean_title[:80], overview[:300]
 
 
 class SourceIntakeService:
@@ -129,7 +106,7 @@ class SourceIntakeService:
                 if not deep_research:
                     # ── Normal mode: single source ──────────────────────────
                     archive_url = self.storage.upload_manifest(main_text, _make_source_id(raw_url, index))
-                    headline, overview = summarize_content_and_create_headline(main_text)
+                    headline, overview = fast_source_meta(main_title, main_text)
                     results.append({
                         "id": _make_source_id(raw_url, index),
                         "kind": "url",
@@ -167,7 +144,7 @@ class SourceIntakeService:
 
                     # Add parent page first
                     parent_archive = self.storage.upload_manifest(main_text, _make_source_id(raw_url, index, "parent"))
-                    parent_headline, parent_overview = summarize_content_and_create_headline(main_text)
+                    parent_headline, parent_overview = fast_source_meta(main_title, main_text)
                     crawled_subpage_urls: List[str] = []
                     results.append({
                         "id": _make_source_id(raw_url, index, "parent"),
@@ -197,7 +174,7 @@ class SourceIntakeService:
                             child_archive = self.storage.upload_manifest(
                                 child_text, _make_source_id(child_url, index, "sub")
                             )
-                            child_headline, child_overview = summarize_content_and_create_headline(child_text)
+                            child_headline, child_overview = fast_source_meta(child_title, child_text)
                             child_favicon = _favicon_url(child_url)
                             crawled_subpage_urls.append(child_url)
                             results.append({
@@ -232,6 +209,8 @@ class SourceIntakeService:
                     "kind": "url",
                     "mode": "deep" if deep_research else "normal",
                     "name": raw_url,
+                    "headline": raw_url,
+                    "overview": str(exc),
                     "source_url": raw_url,
                     "favicon_url": "",
                     "status": "error",
@@ -245,6 +224,44 @@ class SourceIntakeService:
     def ingest_document(self, filename: str, data: bytes, content_type: str) -> Dict[str, Any]:
         if len(data) > 20_000_000:
             raise SourceIntakeError("Document size must be under 20 MB.")
+
+        ext = Path(filename).suffix.lower()
+        is_image = ext in {".png", ".jpg", ".jpeg"} or content_type in {"image/png", "image/jpeg", "image/jpg"}
+
+        if is_image:
+            import uuid
+            if ext not in {".png", ".jpg", ".jpeg"} and content_type not in {"image/png", "image/jpeg", "image/jpg"}:
+                raise SourceIntakeError("Only PNG and JPG/JPEG image formats are accepted.")
+
+            public_dir = Path(__file__).resolve().parent.parent.parent / "static" / "public"
+            public_dir.mkdir(parents=True, exist_ok=True)
+            safe_ext = ext if ext in {".png", ".jpg", ".jpeg"} else (".png" if "png" in content_type else ".jpg")
+            safe_filename = f"img_src_{uuid.uuid4().hex[:10]}{safe_ext}"
+            file_path = public_dir / safe_filename
+            with open(file_path, "wb") as f:
+                f.write(data)
+
+            static_url = f"/static/public/{safe_filename}"
+            headline = f"Image Source: {filename}"
+            overview = f"Uploaded source image asset ({filename}) available for multi-modal reference."
+
+            return {
+                "id": f"img_{uuid.uuid4().hex[:8]}",
+                "kind": "image",
+                "name": filename,
+                "headline": headline,
+                "overview": overview,
+                "source_url": None,
+                "favicon_url": None,
+                "archive_url": static_url,
+                "excerpt": f"[Image Source Asset: {filename}]({static_url})",
+                "content": f"[Image Source Asset: {filename}]({static_url})",
+                "word_count": 0,
+                "deep_pages": [],
+                "status": "ready",
+                "is_subpage": False,
+                "parent_url": None,
+            }
 
         extracted_text = ""
         is_pdf = filename.lower().endswith(".pdf") or content_type == "application/pdf"
@@ -273,7 +290,7 @@ class SourceIntakeService:
             raise SourceIntakeError(f"No readable text found in document '{filename}'.")
 
         archive_url = self.storage.upload_asset(data, filename, content_type)
-        headline, overview = summarize_content_and_create_headline(clean_text)
+        headline, overview = fast_source_meta(filename, clean_text)
 
         # Detect document type
         doc_kind = "document"

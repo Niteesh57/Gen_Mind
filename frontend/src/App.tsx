@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  addSourcesToSession,
   generateLearningMedia,
   getStudioVoices,
   inspectStudioSources,
@@ -24,11 +25,14 @@ function getOrCreateDeviceId(): string {
 }
 
 // ── Session API ──────────────────────────────────────────────────────────────
-const API_BASE = 'http://localhost:8000/api';
+const BACKEND_HOST = 'http://localhost:8000';
+const API_BASE = `${BACKEND_HOST}/api`;
 
 export const resolveMediaUrl = (url?: string) => {
   if (!url) return '';
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/static/')) return `${BACKEND_HOST}${url}`;
+  if (url.startsWith('/api/')) return `${BACKEND_HOST}${url}`;
   return `${API_BASE}${url}`;
 };
 
@@ -115,7 +119,7 @@ const FALLBACK_VOICES: StudioVoice[] = [
   { id: 'en-GB-RyanNeural', label: 'Ryan — UK English (Male)', language: 'en-GB' },
 ];
 const STYLE_PRESETS = ['Clean Editorial', 'Cinematic Dark', 'Minimalist White', 'Vibrant Infographic', 'Technical Blueprint'];
-const ACCEPT_DOCS = '.pdf,.txt,.md,.docx,.pptx';
+const ACCEPT_DOCS = '.pdf,.txt,.md,.docx,.pptx,.png,.jpg,.jpeg';
 
 function formatDate(iso: string) {
   try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
@@ -183,7 +187,26 @@ export const App = () => {
   // ── Init ────────────────────────────────────────────────────────────────
   useEffect(() => {
     apiListSessions(deviceId)
-      .then(setSessions).catch(() => setSessions([]))
+      .then(async (fetchedSessions) => {
+        setSessions(fetchedSessions);
+        const savedSessionId = localStorage.getItem('genmind_active_session_id');
+        if (savedSessionId) {
+          const match = fetchedSessions.find((s) => s.id === savedSessionId);
+          if (match) {
+            await openSession(match);
+          } else {
+            try {
+              const restored = await apiGetSession(savedSessionId);
+              if (restored && restored.id) {
+                await openSession(restored);
+              }
+            } catch {
+              localStorage.removeItem('genmind_active_session_id');
+            }
+          }
+        }
+      })
+      .catch(() => setSessions([]))
       .finally(() => setSessionsLoading(false));
   }, [deviceId]);
 
@@ -212,6 +235,7 @@ export const App = () => {
   const openNewSession = useCallback(async () => {
     const session = await apiCreateSession(deviceId, 'New Media', mode);
     setActiveSession(session);
+    localStorage.setItem('genmind_active_session_id', session.id);
     setSessions((prev) => [session, ...prev]);
     setStep(1); setUrlInput(''); setRawText(''); setFiles([]);
     setSources([]); setResult(null); setError(''); setTopic('New Media');
@@ -222,6 +246,7 @@ export const App = () => {
 
   const openSession = useCallback(async (s: Session) => {
     setActiveSession(s);
+    localStorage.setItem('genmind_active_session_id', s.id);
     setTopic(s.title);
     setMode((s.mode as 'video' | 'conversation') || 'video');
     setError('');
@@ -231,7 +256,19 @@ export const App = () => {
       const full = await apiGetSession(s.id);
       setSources(full.sources || []);
       setSessionOutputs(full.outputs || []);
-      if (full.output_url) {
+      if (full.outputs && full.outputs.length > 0) {
+        const latest = full.outputs[0];
+        setResult({
+          brief: { topic: full.title, output_mode: latest.output_mode || full.mode },
+          mode: (latest.output_mode || full.mode) as 'video' | 'conversation',
+          output_url: latest.output_url,
+          narration: latest.narration || '',
+          items: latest.items,
+          provenance: latest.provenance,
+          stages: ['Loaded from session history'],
+        });
+        setStep(4);
+      } else if (full.output_url) {
         setResult({
           brief: { topic: full.title, output_mode: full.output_mode || full.mode },
           mode: (full.output_mode || full.mode) as 'video' | 'conversation',
@@ -254,6 +291,7 @@ export const App = () => {
 
   const goHome = useCallback(() => {
     setView('home'); setActiveSession(null);
+    localStorage.removeItem('genmind_active_session_id');
     apiListSessions(deviceId).then(setSessions).catch(() => {});
   }, [deviceId]);
 
@@ -275,6 +313,23 @@ export const App = () => {
     }
     setLoadingSources(true);
     setError('');
+
+    // Auto-create session if not currently in an active session
+    let sessionToUse = activeSession;
+    if (!sessionToUse) {
+      try {
+        sessionToUse = await apiCreateSession(deviceId, topic || 'New Media', mode);
+        setActiveSession(sessionToUse);
+        localStorage.setItem('genmind_active_session_id', sessionToUse.id);
+        setSessions((prev) => [sessionToUse!, ...prev]);
+        setView('studio');
+      } catch {
+        setError('Could not initialize session.');
+        setLoadingSources(false);
+        return;
+      }
+    }
+
     setAnalyzingPhase('scraping');
 
     if (urlList.length) {
@@ -310,13 +365,13 @@ export const App = () => {
         } as StudioSource;
       }
 
-      // Phase 1: scrape
+      // Phase 1: scrape & upload
       const [webSources, docSources] = await Promise.all([
-        urlList.length ? inspectStudioSources(urlList, deepResearch, activeSession?.id) : [],
-        Promise.all(uploadList.map(uploadStudioDocument)),
+        urlList.length ? inspectStudioSources(urlList, deepResearch, sessionToUse.id) : [],
+        Promise.all(uploadList.map((file) => uploadStudioDocument(file, sessionToUse.id))),
       ]);
 
-      // Phase 2: preparing overview (LLM already ran server-side, but show state briefly)
+      // Phase 2: preparing overview
       setAnalyzingPhase('preparing');
       setAnalyzingLabel('Preparing overview…');
 
@@ -325,6 +380,13 @@ export const App = () => {
         ...docSources,
         ...(textSource ? [textSource] : []),
       ];
+
+      // Persist ready sources into backend session_db
+      const readyNew = allNew.filter((s) => s.status === 'ready');
+      if (readyNew.length > 0 && sessionToUse.id) {
+        await addSourcesToSession(sessionToUse.id, readyNew).catch(() => {});
+      }
+
       const combined = [...sources, ...allNew];
       setSources(combined);
 
@@ -332,8 +394,8 @@ export const App = () => {
       const readyParent = allNew.find((s) => s.status === 'ready' && s.headline && !s.is_subpage);
       if (readyParent?.headline && (topic === 'New Media' || topic === '')) {
         setTopic(readyParent.headline);
-        if (activeSession) {
-          const updated = await apiUpdateSession(activeSession.id, { title: readyParent.headline });
+        if (sessionToUse) {
+          const updated = await apiUpdateSession(sessionToUse.id, { title: readyParent.headline });
           setActiveSession(updated);
         }
       }
@@ -382,9 +444,9 @@ export const App = () => {
         podcast_tone: podcastTone,
         participant_count: participantCount,
         participant_voices: mode === 'conversation' ? participantVoices : [],
-        source_urls: sources.filter((s) => s.kind === 'url').map((s) => s.source_url || ''),
-        source_assets: sources.map((s) => s.archive_url),
-        source_context: sources.map((s) => s.content || s.excerpt),
+        source_urls: sources.filter((s) => s.kind === 'url' && s.source_url).map((s) => s.source_url as string),
+        source_assets: sources.map((s) => s.archive_url).filter((u): u is string => typeof u === 'string' && u.length > 0),
+        source_context: sources.map((s) => s.content || s.excerpt || '').filter((c): c is string => typeof c === 'string' && c.length > 0),
       });
       setResult(res); setStep(4);
       if (activeSession) {
@@ -522,6 +584,7 @@ export const App = () => {
                     ? s.mode === 'deep'
                       ? isSubpage ? 'Depth-1' : 'Deep'
                       : 'Web'
+                    : s.kind === 'image' ? 'Image'
                     : s.kind === 'pdf' ? 'PDF'
                     : s.kind === 'word' ? 'Word'
                     : s.kind === 'ppt' ? 'PPT'
@@ -558,6 +621,11 @@ export const App = () => {
                       </div>
                     </div>
                     <div className={styles.sourceChipTitle}>{s.headline || s.name}</div>
+                    {s.kind === 'image' && s.archive_url ? (
+                      <div style={{ marginTop: 6, borderRadius: 6, overflow: 'hidden', maxHeight: 110 }}>
+                        <img src={resolveMediaUrl(s.archive_url)} alt={s.name} style={{ width: '100%', objectFit: 'cover' }} />
+                      </div>
+                    ) : null}
                     {s.overview && (
                       <div className={styles.sourceChipExcerpt}>{s.overview.slice(0, 100)}</div>
                     )}
@@ -614,17 +682,17 @@ export const App = () => {
 
             {addMode === 'file' && (
               <div className={styles.addBarFileRow}>
-                <button className={styles.uploadIconBtn} title="Upload PDF" onClick={() => { sidebarFileRef.current?.click(); }}>
+                <button className={styles.uploadIconBtn} title="Upload PDF or Doc" onClick={() => { sidebarFileRef.current?.click(); }}>
                   <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                   </svg>
                   PDF / Word
                 </button>
-                <button className={styles.uploadIconBtn} title="Upload PPT" onClick={() => { sidebarFileRef.current?.click(); }}>
+                <button className={styles.uploadIconBtn} title="Upload PNG or JPG Image" onClick={() => { sidebarFileRef.current?.click(); }}>
                   <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 0v10m0-10h2a2 2 0 012 2v8a2 2 0 01-2 2h-2" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  PPT
+                  Image (PNG/JPG)
                 </button>
                 <input
                   ref={sidebarFileRef}
@@ -1059,6 +1127,15 @@ export const App = () => {
               <button className={styles.modalClose} onClick={() => setViewingSource(null)}>×</button>
             </div>
             <div className={styles.modalBody}>
+              {viewingSource.archive_url && (viewingSource.kind === 'image' || viewingSource.archive_url.match(/\.(png|jpg|jpeg)$/i)) ? (
+                <div style={{ marginBottom: 12, textAlign: 'center' }}>
+                  <img
+                    src={resolveMediaUrl(viewingSource.archive_url)}
+                    alt={viewingSource.name}
+                    style={{ maxWidth: '100%', maxHeight: 350, borderRadius: 8, objectFit: 'contain' }}
+                  />
+                </div>
+              ) : null}
               <p className={styles.contentText}>{viewingSource.content || viewingSource.excerpt}</p>
             </div>
           </div>

@@ -78,9 +78,18 @@ class DashScopeGenblazeProvider(SyncProvider):
                 step.metadata["output_text"] = ""
                 step.metadata["error"] = str(exc)
         elif step.modality == Modality.IMAGE:
+            input_images = step.metadata.get("input_images", [])
+            content_list = []
+            for img in input_images:
+                if img:
+                    img_full = f"http://localhost:8000{img}" if img.startswith("/static/") else img
+                    content_list.append({"image": img_full})
+            content_list.append({"text": step.prompt[:1200]})
+
+            model_name = step.model if step.model and step.model != "default" else image_model
             payload = {
-                "model": image_model,
-                "input": {"messages": [{"role": "user", "content": [{"text": step.prompt[:1200]}]}]},
+                "model": model_name,
+                "input": {"messages": [{"role": "user", "content": content_list}]},
                 "parameters": {"prompt_extend": False, "size": image_size}
             }
             req = urllib.request.Request(
@@ -144,6 +153,37 @@ class LearningStudioPipeline:
         self.storage = storage
         self.speech = EdgeTtsSpeechAgent()
         self.dashscope_provider = DashScopeGenblazeProvider()
+
+    @staticmethod
+    def _prepare_user_photo_frame(photo_url_or_path: str, title: str, narration: str, index: int, total: int, style: str) -> Optional[bytes]:
+        """Loads a user uploaded photo, fits it onto a 16:9 canvas with an editorial caption banner."""
+        try:
+            public_dir = Path(__file__).resolve().parent.parent.parent / "static" / "public"
+            photo_file = None
+            if "/static/public/" in photo_url_or_path:
+                fname = photo_url_or_path.split("/static/public/")[-1]
+                photo_file = public_dir / fname
+            elif os.path.exists(photo_url_or_path):
+                photo_file = Path(photo_url_or_path)
+
+            if photo_file and photo_file.exists():
+                with Image.open(photo_file) as img:
+                    img = img.convert("RGB")
+                    canvas = Image.new("RGB", (1280, 720), (15, 23, 42))
+                    img.thumbnail((1280, 720), Image.Resampling.LANCZOS)
+                    x = (1280 - img.width) // 2
+                    y = (720 - img.height) // 2
+                    canvas.paste(img, (x, y))
+
+                    draw = ImageDraw.Draw(canvas)
+                    draw.rectangle([0, 640, 1280, 720], fill=(15, 23, 42))
+                    draw.text((30, 665), f"Reference Photo — Scene {index}/{total}: {title[:55]}", fill=(255, 255, 255))
+                    buf = io.BytesIO()
+                    canvas.save(buf, format="PNG")
+                    return buf.getvalue()
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _render_styled_frame(title: str, text: str, index: int, total: int, style: str, topic: str) -> bytes:
@@ -573,10 +613,17 @@ class LearningStudioPipeline:
 
 
         else:
-            # VIDEO EXPLANATION PIPELINE (GenBlaze 16:9 PC Widescreen z-image-turbo AI Images)
+            # VIDEO EXPLANATION PIPELINE (GenBlaze 16:9 PC Widescreen AI Images & User Photo Context)
             images_meta = []
             video_clips = []
             temp_files = []
+
+            # Filter user image assets if any were provided in brief.source_assets
+            user_image_assets = []
+            if brief.source_assets:
+                for asset in brief.source_assets:
+                    if asset and (asset.endswith((".png", ".jpg", ".jpeg")) or "/static/public/img_src_" in asset):
+                        user_image_assets.append(asset)
 
             for scene in items:
                 idx = scene["index"]
@@ -587,18 +634,36 @@ class LearningStudioPipeline:
                 img_bytes = None
                 image_source = f"GenBlaze Pipeline ({image_model} 16:9 Widescreen)"
 
+                # Assign user photo asset for scene if available
+                matched_user_photo = user_image_assets[(idx - 1) % len(user_image_assets)] if user_image_assets else None
+                if matched_user_photo:
+                    prompt_text = f"Feature and explain the concept in reference photo Image 1 for scene '{title}'. Narration context: {narration[:250]}. Visual style: {brief.image_style}. Widescreen 16:9 composition."
+
                 try:
                     import base64
                     img_p = Pipeline("image_gen_step")
-                    img_p.step(self.dashscope_provider, model=image_model, prompt=prompt_text, modality=Modality.IMAGE)
+                    step_obj = Step(self.dashscope_provider, model=image_model, prompt=prompt_text, modality=Modality.IMAGE)
+                    if matched_user_photo:
+                        step_obj.metadata["input_images"] = [matched_user_photo]
+                    elif brief.source_assets:
+                        step_obj.metadata["input_images"] = brief.source_assets
+                    img_p.step(step_obj)
                     img_res = img_p.run(raise_on_failure=False)
                     try: _pipeline_manifests.append(img_res.manifest)
                     except Exception: pass
                     img_b64 = img_res.run.steps[0].metadata.get("img_b64")
                     if img_b64:
                         img_bytes = base64.b64decode(img_b64)
+                        if matched_user_photo:
+                            image_source = f"GenBlaze AI + User Photo Reference ({image_model})"
                 except Exception:
                     img_bytes = None
+
+                # Fallback to direct user photo frame if AI generation returned no image and user photo is available
+                if not img_bytes and matched_user_photo:
+                    img_bytes = self._prepare_user_photo_frame(matched_user_photo, title, narration, idx, len(items), brief.image_style)
+                    if img_bytes:
+                        image_source = f"Uploaded User Photo Asset ({Path(matched_user_photo).name})"
 
                 if not img_bytes:
                     img_bytes = self._render_styled_frame(title, narration, idx, len(items), brief.image_style, brief.topic)

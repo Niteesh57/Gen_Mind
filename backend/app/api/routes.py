@@ -2,7 +2,7 @@ import json
 import os
 import urllib.request
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -35,6 +35,10 @@ def get_intake() -> SourceIntakeService: return _intake
 
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
+class SourceAddRequest(BaseModel):
+    session_id: str
+    sources: List[Dict[str, Any]]
+
 class StudioGenerateRequest(BaseModel):
     project_id: str = "learning_studio"
     session_id: Optional[str] = None
@@ -48,9 +52,9 @@ class StudioGenerateRequest(BaseModel):
     podcast_tone: Literal["friendly", "serious", "deep_dive"] = "friendly"
     participant_count: int = 2
     participant_voices: List[str] = []
-    source_urls: List[str] = []
-    source_assets: List[str] = []
-    source_context: List[str] = []
+    source_urls: Optional[List[Optional[str]]] = []
+    source_assets: Optional[List[Optional[str]]] = []
+    source_context: Optional[List[Optional[str]]] = []
 
 class SourceInspectRequest(BaseModel):
     urls: List[str]
@@ -245,12 +249,27 @@ def inspect_sources(req: SourceInspectRequest, intake: SourceIntakeService = Dep
     return results
 
 @router.post("/studio/sources/upload")
-async def upload_source_document(file: UploadFile = File(...), intake: SourceIntakeService = Depends(get_intake)) -> Dict[str, Any]:
+async def upload_source_document(
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    intake: SourceIntakeService = Depends(get_intake)
+) -> Dict[str, Any]:
     try:
         data = await file.read()
-        return intake.ingest_document(file.filename or "source", data, file.content_type or "application/octet-stream")
+        res = intake.ingest_document(file.filename or "source", data, file.content_type or "application/octet-stream")
+        if session_id and res.get("status") == "ready":
+            session_db.add_session_sources(session_id, [res])
+        return res
     except SourceIntakeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@router.post("/studio/sources/add")
+def add_sources_to_session(req: SourceAddRequest) -> Dict[str, Any]:
+    if req.session_id and req.sources:
+        ready = [s for s in req.sources if s.get("status") == "ready"]
+        if ready:
+            session_db.add_session_sources(req.session_id, ready)
+    return {"added": len(req.sources)}
 
 # ─── Studio Generate ──────────────────────────────────────────────────────────
 
@@ -259,15 +278,20 @@ def generate_learning_media(req: StudioGenerateRequest, studio: LearningStudioPi
     if req.output_mode == "conversation" and not 1 <= req.participant_count <= 4:
         raise HTTPException(status_code=422, detail="Podcast audio requires between 1 and 4 participants.")
 
-    # Use full accumulated session content as the knowledge base when available
-    source_context = req.source_context
+    # Clean and filter out any None or empty items
+    clean_urls = [u for u in (req.source_urls or []) if u]
+    clean_assets = [a for a in (req.source_assets or []) if a]
+    clean_context = [c for c in (req.source_context or []) if c]
+
     if req.session_id:
         full_content = get_session_content(req.session_id)
         if full_content.strip():
-            source_context = [full_content]
+            clean_context = [full_content]
 
     brief_data = req.model_dump(exclude={"session_id"})
-    brief_data["source_context"] = source_context
+    brief_data["source_urls"] = clean_urls
+    brief_data["source_assets"] = clean_assets
+    brief_data["source_context"] = clean_context
     result = studio.run(StudioBrief(**brief_data))
 
     # Persist to SQLite session if session_id provided
