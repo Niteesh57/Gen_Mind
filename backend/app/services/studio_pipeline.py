@@ -5,6 +5,7 @@ import asyncio
 import io
 import json
 import os
+import random
 import re
 import urllib.request
 import uuid
@@ -35,10 +36,8 @@ AZURE_VOICES = [
     {"id": "en-US-ChristopherNeural", "label": "Christopher — US English (Male)", "language": "en-US"},
     {"id": "en-IN-NeerjaNeural", "label": "Neerja — Indian English (Female)", "language": "en-IN"},
     {"id": "en-IN-PrabhatNeural", "label": "Prabhat — Indian English (Male)", "language": "en-IN"},
-    {"id": "hi-IN-SwaraNeural", "label": "Swara — Hindi (Female)", "language": "hi-IN"},
-    {"id": "hi-IN-MadhurNeural", "label": "Madhur — Hindi (Male)", "language": "hi-IN"},
-    {"id": "es-ES-ElviraNeural", "label": "Elvira — Spanish (Female)", "language": "es-ES"},
-    {"id": "es-ES-AlvaroNeural", "label": "Alvaro — Spanish (Male)", "language": "es-ES"},
+    {"id": "en-GB-SoniaNeural", "label": "Sonia — UK English (Female)", "language": "en-GB"},
+    {"id": "en-GB-RyanNeural", "label": "Ryan — UK English (Male)", "language": "en-GB"},
 ]
 
 class ProviderUnavailable(RuntimeError): pass
@@ -70,7 +69,7 @@ class DashScopeGenblazeProvider(SyncProvider):
                 method="POST"
             )
             try:
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=90) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 text = data["choices"][0]["message"]["content"]
                 step.metadata["output_text"] = text
@@ -82,7 +81,7 @@ class DashScopeGenblazeProvider(SyncProvider):
             payload = {
                 "model": image_model,
                 "input": {"messages": [{"role": "user", "content": [{"text": step.prompt[:1200]}]}]},
-                "parameters": {"prompt_extend": False, "size": image_size} # 16:9 PC Widescreen from .env
+                "parameters": {"prompt_extend": False, "size": image_size}
             }
             req = urllib.request.Request(
                 image_url,
@@ -91,13 +90,12 @@ class DashScopeGenblazeProvider(SyncProvider):
                 method="POST"
             )
             try:
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=60) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 img_url = data["output"]["choices"][0]["message"]["content"][0]["image"]
                 img_req = urllib.request.Request(img_url, headers={"User-Agent": "Mozilla/5.0"})
                 with urllib.request.urlopen(img_req, timeout=30) as img_resp:
                     img_bytes = img_resp.read()
-                # Store base64 encoded string in metadata so genblaze_core canonical hash won't crash on bytes
                 import base64
                 step.metadata["img_b64"] = base64.b64encode(img_bytes).decode("utf-8")
                 step.metadata["img_url"] = img_url
@@ -128,11 +126,12 @@ class EdgeTtsSpeechAgent:
 class StudioBrief:
     project_id: str
     topic: str
-    image_count: int  # Range 5 to 15
-    image_style: str  # Pre-existing style or custom style input
-    language: str
-    output_mode: str  # "video" or "conversation"
-    voice: str
+    image_count: int = 6  # Will be dynamically decided between 3 and 8 by LLM
+    depth_level: str = "critical"  # "short", "critical", "depth"
+    image_style: str = "Clean Editorial"
+    language: str = "en-US"
+    output_mode: str = "video"  # "video" or "conversation"
+    voice: str = "en-US-JennyNeural"
     podcast_tone: str = "friendly"  # "friendly", "serious", "deep_dive"
     participant_count: int = 2  # 1 to 4 speakers
     participant_voices: Optional[List[str]] = None
@@ -202,53 +201,156 @@ class LearningStudioPipeline:
 
     def _build_script(self, brief: StudioBrief) -> List[Dict[str, Any]]:
         sources_text = "\n".join(brief.source_context or [])
-        clean_context = sources_text[:6000] if sources_text else brief.topic
+        clean_context = sources_text[:15000] if sources_text else brief.topic
         text_model = os.getenv("DASHSCOPE_TEXT_MODEL", "qwen3.5-flash")
+        depth = brief.depth_level or "critical"
 
         if brief.output_mode == "conversation":
-            speaker_voices = brief.participant_voices or [
-                "en-US-JennyNeural", "en-US-GuyNeural", "en-US-AriaNeural", "en-US-ChristopherNeural"
-            ][:brief.participant_count]
+            available_voices = [v["id"] for v in AZURE_VOICES]
+            speaker_count = max(1, min(4, brief.participant_count))
+            speaker_voices = random.sample(available_voices, k=speaker_count) if len(available_voices) >= speaker_count else available_voices[:speaker_count]
+            speaker_names = ["Alex", "Sam", "Jordan", "Morgan"][:speaker_count]
 
-            try:
-                p = Pipeline("script_generation")
-                prompt = (
-                    f"Create a natural {brief.podcast_tone} audio podcast script about '{brief.topic}' "
-                    f"with {brief.participant_count} speaker(s).\n"
-                    f"Background context:\n{clean_context}\n\n"
-                    "Return JSON ONLY: an array of objects. Each object MUST have:\n"
-                    '{"index": int, "speaker_index": int (0 to N-1), "speaker_name": string, "narration": string}\n'
-                    "Generate 8 to 14 engaging, continuous dialogue turns."
+            tone_dynamics = {
+                "friendly": (
+                    "Casual, lively, conversational interjections. Speakers should interrupt or jump in naturally "
+                    "(e.g., 'Hey wait, let me step in!', 'Hold on, is that really true?', 'Haha okay, explain that!'). "
+                    "Keep the back-and-forth interactive and energetic."
+                ),
+                "deep_dive": (
+                    "Expert-to-expert technical discussion. Deep domain knowledge, precise terminology, "
+                    "rigorous analysis of mechanics and trade-offs."
+                ),
+                "serious": (
+                    "Debating and challenging tone. Respectful friction and questioning assumptions "
+                    "(e.g., 'Wait a minute, doesn't that ruin performance?', 'Don't assume everyone agrees with that...')."
                 )
-                p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
-                res = p.run(raise_on_failure=False)
-                raw = res.run.steps[0].metadata.get("output_text", "")
-                clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
-                clean_json = re.sub(r"```$", "", clean_json).strip()
-                parsed = json.loads(clean_json)
+            }.get(brief.podcast_tone, "Casual conversational flow.")
 
-                if isinstance(parsed, list) and len(parsed) > 0:
-                    turns = []
-                    for item in parsed:
-                        spk_idx = int(item.get("speaker_index", 0)) % len(speaker_voices)
-                        voice = speaker_voices[spk_idx]
-                        turns.append({
-                            "index": len(turns) + 1,
-                            "speaker_index": spk_idx,
-                            "speaker_name": str(item.get("speaker_name", f"Speaker {spk_idx + 1}")),
-                            "voice": voice,
-                            "narration": str(item.get("narration", ""))
-                        })
-                    return turns
-            except Exception:
-                pass
+            # Multi-step pipeline generation based on depth
+            if depth == "short":
+                # ~2.5 - 3 min podcast (~10-14 dialogue turns, ~500 words)
+                try:
+                    p = Pipeline("podcast_short")
+                    prompt = (
+                        f"Create a short 3-minute audio podcast script about '{brief.topic}' with {speaker_count} speaker(s).\n"
+                        f"Tone: {tone_dynamics}\n"
+                        f"Speaker names: {', '.join(speaker_names)}\n"
+                        f"Source Context:\n{clean_context}\n\n"
+                        "Return JSON ONLY: an array of 10 to 14 turn objects. Each object MUST have:\n"
+                        '{"index": int, "speaker_index": int (0 to N-1), "speaker_name": string, "narration": string}\n'
+                        "Keep narration punchy, covering basic definitions, key concepts, and quick outlook."
+                    )
+                    p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
+                    res = p.run(raise_on_failure=False)
+                    raw = res.run.steps[0].metadata.get("output_text", "")
+                    clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
+                    clean_json = re.sub(r"```$", "", clean_json).strip()
+                    parsed = json.loads(clean_json)
 
-            turns_count = {"friendly": 8, "serious": 12, "deep_dive": 16}.get(brief.podcast_tone, 10)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        turns = []
+                        for item in parsed:
+                            spk_idx = int(item.get("speaker_index", 0)) % len(speaker_voices)
+                            turns.append({
+                                "index": len(turns) + 1,
+                                "speaker_index": spk_idx,
+                                "speaker_name": str(item.get("speaker_name") or speaker_names[spk_idx]),
+                                "voice": speaker_voices[spk_idx],
+                                "narration": str(item.get("narration", ""))
+                            })
+                        return turns
+                except Exception:
+                    pass
+
+            elif depth == "critical":
+                # ~5 - 7 min podcast (~25-35 dialogue turns, ~1500 words)
+                try:
+                    # Step 1: Outline 2 discussion sections
+                    p1 = Pipeline("podcast_critical_outline")
+                    p1.step(self.dashscope_provider, model=text_model, prompt=f"Outline 2 detailed technical podcast sections for '{brief.topic}' based on:\n{clean_context}\nReturn JSON array of section title strings.", modality=Modality.TEXT)
+                    r1 = p1.run(raise_on_failure=False)
+                    raw1 = r1.run.steps[0].metadata.get("output_text", "")
+                    sec_titles = json.loads(re.sub(r"^```json\s*|```$", "", raw1, flags=re.I).strip()) if "```" in raw1 else ["Core Mechanics", "Practical Applications"]
+
+                    all_turns = []
+                    for s_idx, title in enumerate(sec_titles[:2]):
+                        p_sec = Pipeline(f"podcast_sec_{s_idx}")
+                        prompt_sec = (
+                            f"Generate Part {s_idx + 1} of a 6-minute podcast on '{brief.topic}'. Section focus: {title}.\n"
+                            f"Tone & Dynamics: {tone_dynamics}\n"
+                            f"Speakers: {', '.join(speaker_names)}\n"
+                            f"Source Context:\n{clean_context}\n\n"
+                            "Return JSON ONLY: an array of 12 to 16 turn objects. Each object MUST have:\n"
+                            '{"speaker_index": int (0 to N-1), "speaker_name": string, "narration": string}\n'
+                            "Make narration rich with technical terms and thorough explanations."
+                        )
+                        p_sec.step(self.dashscope_provider, model=text_model, prompt=prompt_sec, modality=Modality.TEXT)
+                        r_sec = p_sec.run(raise_on_failure=False)
+                        raw_sec = r_sec.run.steps[0].metadata.get("output_text", "")
+                        parsed_sec = json.loads(re.sub(r"^```json\s*|```$", "", raw_sec, flags=re.I).strip())
+                        if isinstance(parsed_sec, list):
+                            for item in parsed_sec:
+                                spk_idx = int(item.get("speaker_index", 0)) % len(speaker_voices)
+                                all_turns.append({
+                                    "index": len(all_turns) + 1,
+                                    "speaker_index": spk_idx,
+                                    "speaker_name": str(item.get("speaker_name") or speaker_names[spk_idx]),
+                                    "voice": speaker_voices[spk_idx],
+                                    "narration": str(item.get("narration", ""))
+                                })
+                    if len(all_turns) >= 15:
+                        return all_turns
+                except Exception:
+                    pass
+
+            else:  # depth == "depth"
+                # Long-Form Deep Podcast (~20 - 45 min, ~70-120 dialogue turns, ~5000+ words)
+                try:
+                    modules = [
+                        "Module 1: Foundational Concepts, System Architecture & Core Terminology",
+                        "Module 2: Deep Technical Mechanics, Low-Level Optimizations & Benchmarks",
+                        "Module 3: Enterprise Integration, Edge Cases & Real-World Implementations",
+                        "Module 4: Future Roadmap, Strategic Implications & Emerging Industry Trends"
+                    ]
+                    all_turns = []
+                    for m_idx, mod_title in enumerate(modules):
+                        p_mod = Pipeline(f"podcast_deep_mod_{m_idx}")
+                        prompt_mod = (
+                            f"Generate {mod_title} for a comprehensive 30-minute deep-dive podcast about '{brief.topic}'.\n"
+                            f"Tone & Dynamics: {tone_dynamics}\n"
+                            f"Speakers: {', '.join(speaker_names)}\n"
+                            f"Source Context:\n{clean_context}\n\n"
+                            "Return JSON ONLY: an array of 18 to 25 detailed dialogue turn objects. Each object MUST have:\n"
+                            '{"speaker_index": int (0 to N-1), "speaker_name": string, "narration": string}\n'
+                            "Include in-depth explanations, specific technical examples, code/hardware mechanics, and thorough analysis."
+                        )
+                        p_mod.step(self.dashscope_provider, model=text_model, prompt=prompt_mod, modality=Modality.TEXT)
+                        r_mod = p_mod.run(raise_on_failure=False)
+                        raw_mod = r_mod.run.steps[0].metadata.get("output_text", "")
+                        parsed_mod = json.loads(re.sub(r"^```json\s*|```$", "", raw_mod, flags=re.I).strip())
+                        if isinstance(parsed_mod, list):
+                            for item in parsed_mod:
+                                spk_idx = int(item.get("speaker_index", 0)) % len(speaker_voices)
+                                all_turns.append({
+                                    "index": len(all_turns) + 1,
+                                    "speaker_index": spk_idx,
+                                    "speaker_name": str(item.get("speaker_name") or speaker_names[spk_idx]),
+                                    "voice": speaker_voices[spk_idx],
+                                    "narration": str(item.get("narration", ""))
+                                })
+                    if len(all_turns) >= 40:
+                        return all_turns
+                except Exception:
+                    pass
+
+            # Fallback for podcast
+            turns_count = {"short": 12, "critical": 28, "depth": 60}.get(depth, 28)
             turns = []
             for i in range(turns_count):
                 spk_idx = i % len(speaker_voices)
-                spk_name = f"Host {spk_idx + 1}" if spk_idx == 0 else f"Expert {spk_idx + 1}"
-                text = f"Exploring key aspect {i + 1} of {brief.topic}. Building upon our core research findings."
+                spk_name = speaker_names[spk_idx]
+                text = f"Examining key topic aspect {i + 1} of {brief.topic}. Diving into detailed analysis and system mechanics."
                 turns.append({
                     "index": i + 1,
                     "speaker_index": spk_idx,
@@ -259,17 +361,26 @@ class LearningStudioPipeline:
             return turns
 
         else:
-            # VIDEO EXPLANATION MODE (5 to 15 Images)
-            count = max(5, min(15, brief.image_count))
+            # VIDEO EXPLANATION PIPELINE (3 to 8 Scenes with exact word counts for target timings)
+            # short: 3 scenes, ~2.5-3 min total (~150 words per scene)
+            # critical: 5-6 scenes, ~5-7 min total (~220 words per scene)
+            # depth: 7-8 scenes, ~10 min total (~300 words per scene)
+
+            scene_count_target = {"short": 3, "critical": 5, "depth": 8}.get(depth, 5)
+            words_per_scene = {"short": "120 to 150", "critical": "180 to 240", "depth": "260 to 350"}.get(depth, "180 to 240")
+            timing_target = {"short": "2.5 to 3 minutes", "critical": "5 to 7 minutes", "depth": "10 minutes"}.get(depth, "5 to 7 minutes")
+
             try:
                 p = Pipeline("video_script_gen")
                 prompt = (
-                    f"Create an educational script for a {count}-scene video explanation about '{brief.topic}'.\n"
-                    f"Background context:\n{clean_context}\n\n"
-                    f"Return JSON ONLY: an array of exactly {count} scene objects in sequence. "
-                    "Each scene object MUST have:\n"
-                    '{"index": int (1 to N), "title": string, "narration": string}\n'
-                    "Keep narration informative, engaging, and clear."
+                    f"Create a comprehensive video script for '{brief.topic}' designed for a total runtime of {timing_target}.\n"
+                    f"Depth Level: {depth.upper()}\n"
+                    f"Required Scene Count: Exactly {scene_count_target} scenes.\n"
+                    f"Required Narration Length: Each scene MUST have {words_per_scene} words of detailed narration.\n"
+                    f"Source Context:\n{clean_context}\n\n"
+                    "Return JSON ONLY: an object with key 'scenes':\n"
+                    '{"scenes": [{"index": 1..N, "title": string, "narration": string}]}\n'
+                    "Make each scene's narration rich, clear, educational, and thorough."
                 )
                 p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
                 res = p.run(raise_on_failure=False)
@@ -278,9 +389,10 @@ class LearningStudioPipeline:
                 clean_json = re.sub(r"```$", "", clean_json).strip()
                 parsed = json.loads(clean_json)
 
-                if isinstance(parsed, list) and len(parsed) >= count:
+                scene_list = parsed.get("scenes", []) if isinstance(parsed, dict) else parsed
+                if isinstance(scene_list, list) and len(scene_list) > 0:
                     scenes = []
-                    for idx, item in enumerate(parsed[:count]):
+                    for idx, item in enumerate(scene_list[:scene_count_target]):
                         scenes.append({
                             "index": idx + 1,
                             "title": str(item.get("title", f"Scene {idx + 1}")),
@@ -290,15 +402,24 @@ class LearningStudioPipeline:
             except Exception:
                 pass
 
+            fallback_words_count = {"short": 130, "critical": 220, "depth": 300}.get(depth, 200)
             scenes = []
-            for i in range(count):
+            for i in range(scene_count_target):
                 idx = i + 1
+                body_text = (
+                    f"Examining key component {idx} of {brief.topic}. Building upon extracted source research, "
+                    f"we analyze the core mechanisms, operational workflows, and technical principles governing this layer. "
+                    f"Understanding how {brief.topic} handles workloads in real-world environments provides essential insight into system performance, "
+                    f"scalability, and software-hardware co-design optimization. "
+                ) * (fallback_words_count // 35 + 1)
+                words = body_text.split()[:fallback_words_count]
                 scenes.append({
                     "index": idx,
                     "title": f"Section {idx}: {brief.topic[:30]}",
-                    "narration": f"Examining component {idx} of {brief.topic} based on extracted source research."
+                    "narration": " ".join(words)
                 })
             return scenes
+
 
     def run(self, brief: StudioBrief) -> Dict[str, Any]:
         stages = ["Sources ingested", "GenBlaze Pipeline initialized from .env"]
@@ -343,8 +464,13 @@ class LearningStudioPipeline:
                 for clip in audio_clips:
                     clip.close()
 
-                master_url = f"/static/public/{master_filename}"
-                stages.append(f"Compiled podcast with {len(items)} dialogue turns")
+                # Upload compiled master audio to storage backend (B2 S3 presigned URL) & delete local file
+                with open(master_path, "rb") as f:
+                    master_bytes = f.read()
+                master_url = self.storage.upload_asset(master_bytes, master_filename, "audio/mpeg")
+                temp_audio_files.append(str(master_path))
+
+                stages.append(f"Compiled podcast with {len(items)} dialogue turns & stored to B2 Cloud")
             except Exception as exc:
                 master_url = voice_tracks[0]["url"] if voice_tracks else None
                 stages.append(f"Podcast assembly note: {exc}")
@@ -365,6 +491,7 @@ class LearningStudioPipeline:
                 "stages": stages
             }
 
+
         else:
             # VIDEO EXPLANATION PIPELINE (GenBlaze 16:9 PC Widescreen z-image-turbo AI Images)
             images_meta = []
@@ -376,7 +503,7 @@ class LearningStudioPipeline:
                 narration = scene["narration"]
                 title = scene["title"]
 
-                prompt_text = f"{title}: {narration}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed."
+                prompt_text = f"{title}: {narration[:300]}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed."
                 img_bytes = None
                 image_source = f"GenBlaze Pipeline ({image_model} 16:9 Widescreen)"
 
@@ -405,7 +532,8 @@ class LearningStudioPipeline:
                     f.write(img_bytes)
                 temp_files.append(str(t_img_path))
 
-                audio_bytes = self.speech.synthesize(narration, brief.voice)
+                narrator_voice = brief.voice if (brief.voice and brief.voice != "default") else random.choice([v["id"] for v in AZURE_VOICES])
+                audio_bytes = self.speech.synthesize(narration, narrator_voice)
                 t_aud_path = public_dir / f"temp_aud_{uuid.uuid4().hex[:6]}.mp3"
                 with open(t_aud_path, "wb") as f:
                     f.write(audio_bytes)
@@ -421,8 +549,14 @@ class LearningStudioPipeline:
             try:
                 final_video = concatenate_videoclips([vc[0] for vc in video_clips])
                 final_video.write_videofile(str(mp4_path), fps=2, logger=None)
-                output_video_url = f"/static/public/{mp4_filename}"
-                stages.append(f"Successfully compiled {len(items)} GenBlaze 16:9 PC widescreen AI scene frames into MP4 video")
+
+                # Upload compiled master MP4 video to storage backend (B2 S3 presigned URL) & delete local file
+                with open(mp4_path, "rb") as f:
+                    mp4_bytes = f.read()
+                output_video_url = self.storage.upload_asset(mp4_bytes, mp4_filename, "video/mp4")
+                temp_files.append(str(mp4_path))
+
+                stages.append(f"Successfully compiled {len(items)} GenBlaze 16:9 PC widescreen AI scene frames into MP4 video & stored to B2 Cloud")
             except Exception as exc:
                 output_video_url = images_meta[0]["url"] if images_meta else None
                 stages.append(f"Video assembly note: {exc}")
@@ -447,3 +581,4 @@ class LearningStudioPipeline:
                 "narration": full_script,
                 "stages": stages
             }
+

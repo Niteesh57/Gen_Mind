@@ -26,7 +26,8 @@ export interface LearningMediaPayload {
   project_id: string;
   session_id?: string;
   topic: string;
-  image_count: number; // 5 to 15
+  image_count: number;
+  depth_level?: 'short' | 'critical' | 'depth';
   image_style: string;
   language: string;
   output_mode: 'video' | 'conversation';
@@ -38,6 +39,7 @@ export interface LearningMediaPayload {
   source_assets: string[];
   source_context: string[];
 }
+
 
 export interface StudioSource {
   id: string;

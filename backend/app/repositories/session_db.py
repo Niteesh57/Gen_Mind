@@ -62,6 +62,7 @@ def init_db() -> None:
                 output_url  TEXT,
                 narration   TEXT,
                 stages      TEXT,
+                items_json  TEXT,
                 created_at  TEXT NOT NULL
             );
         """)
@@ -83,6 +84,9 @@ def _migrate() -> None:
         ]:
             if col not in src_cols:
                 conn.execute(f"ALTER TABLE session_sources ADD COLUMN {col} {typ}")
+        existing_out = {row[1] for row in conn.execute("PRAGMA table_info(session_outputs)").fetchall()}
+        if "items_json" not in existing_out:
+            conn.execute("ALTER TABLE session_outputs ADD COLUMN items_json TEXT")
         conn.commit()
 
 def _now() -> str:
@@ -206,12 +210,20 @@ def add_session_sources(session_id: str, sources: List[Dict[str, Any]]) -> None:
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
 
-def save_session_output(session_id: str, output_mode: str, output_url: str, narration: str, stages: List[str]) -> None:
+def save_session_output(
+    session_id: str,
+    output_mode: str,
+    output_url: str,
+    narration: str,
+    stages: List[str],
+    items: Optional[List[Dict[str, Any]]] = None
+) -> None:
     now = _now()
+    items_str = json.dumps(items or [])
     with _connect() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO session_outputs (id, session_id, output_mode, output_url, narration, stages, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), session_id, output_mode, output_url, narration[:2000], json.dumps(stages), now)
+            "INSERT OR REPLACE INTO session_outputs (id, session_id, output_mode, output_url, narration, stages, items_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), session_id, output_mode, output_url, narration[:5000], json.dumps(stages), items_str, now)
         )
         conn.execute(
             "UPDATE sessions SET output_url = ?, output_mode = ?, narration = ?, updated_at = ? WHERE id = ?",
@@ -226,6 +238,28 @@ def get_session_sources(session_id: str) -> List[Dict[str, Any]]:
             (session_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+def get_session_outputs(session_id: str) -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM session_outputs WHERE session_id = ? ORDER BY created_at DESC",
+            (session_id,)
+        ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["stages"] = json.loads(d.get("stages") or "[]")
+        except Exception:
+            d["stages"] = []
+        try:
+            d["items"] = json.loads(d.get("items_json") or "[]")
+        except Exception:
+            d["items"] = []
+        results.append(d)
+    return results
+
+
 
 # Initialize + migrate on import
 init_db()

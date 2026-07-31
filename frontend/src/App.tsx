@@ -8,7 +8,9 @@ import {
   type StudioSource,
   type StudioVoice,
 } from './services/studioClient';
+import { CustomAudioPlayer, type Turn } from './components/CustomAudioPlayer';
 import styles from './App.module.css';
+
 
 // ── Device ID ────────────────────────────────────────────────────────────────
 function getOrCreateDeviceId(): string {
@@ -24,6 +26,24 @@ function getOrCreateDeviceId(): string {
 // ── Session API ──────────────────────────────────────────────────────────────
 const API_BASE = 'http://localhost:8000/api';
 
+export const resolveMediaUrl = (url?: string) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `${API_BASE}${url}`;
+};
+
+interface SessionOutput {
+  id: string;
+  session_id: string;
+  output_mode: 'video' | 'conversation';
+  output_url: string;
+  narration: string;
+  stages?: string[];
+  items?: Turn[];
+  created_at?: string;
+}
+
+
 interface Session {
   id: string;
   device_id: string;
@@ -36,6 +56,11 @@ interface Session {
   output_url?: string;
   output_mode?: string;
   narration?: string;
+}
+
+async function apiGetSession(sessionId: string): Promise<Session & { sources: StudioSource[], outputs: SessionOutput[] }> {
+  const r = await fetch(`${API_BASE}/sessions/${sessionId}`);
+  return r.json();
 }
 
 async function apiListSessions(deviceId: string): Promise<Session[]> {
@@ -70,10 +95,8 @@ const FALLBACK_VOICES: StudioVoice[] = [
   { id: 'en-US-ChristopherNeural', label: 'Christopher — US English (Male)', language: 'en-US' },
   { id: 'en-IN-NeerjaNeural', label: 'Neerja — Indian English (Female)', language: 'en-IN' },
   { id: 'en-IN-PrabhatNeural', label: 'Prabhat — Indian English (Male)', language: 'en-IN' },
-  { id: 'hi-IN-SwaraNeural', label: 'Swara — Hindi (Female)', language: 'hi-IN' },
-  { id: 'hi-IN-MadhurNeural', label: 'Madhur — Hindi (Male)', language: 'hi-IN' },
-  { id: 'es-ES-ElviraNeural', label: 'Elvira — Spanish (Female)', language: 'es-ES' },
-  { id: 'es-ES-AlvaroNeural', label: 'Alvaro — Spanish (Male)', language: 'es-ES' },
+  { id: 'en-GB-SoniaNeural', label: 'Sonia — UK English (Female)', language: 'en-GB' },
+  { id: 'en-GB-RyanNeural', label: 'Ryan — UK English (Male)', language: 'en-GB' },
 ];
 const STYLE_PRESETS = ['Clean Editorial', 'Cinematic Dark', 'Minimalist White', 'Vibrant Infographic', 'Technical Blueprint'];
 const ACCEPT_DOCS = '.pdf,.txt,.md,.docx,.pptx';
@@ -85,6 +108,7 @@ function formatDate(iso: string) {
 function fmtWords(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`; }
 
 type AddMode = 'url' | 'file' | 'text';
+interface StorageInfo { is_b2: boolean; bucket: string; }
 
 // ════════════════════════════════════════════════════════════════════════════
 export const App = () => {
@@ -104,6 +128,15 @@ export const App = () => {
   const [deepResearch, setDeepResearch] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [sources, setSources] = useState<StudioSource[]>([]);
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const [sessionOutputs, setSessionOutputs] = useState<SessionOutput[]>([]);
+
+  // Strictly filter Media History by activeSession.id
+  const currentSessionOutputs = useMemo(() => {
+    if (!activeSession) return [];
+    return sessionOutputs.filter((out) => out.session_id === activeSession.id);
+  }, [activeSession, sessionOutputs]);
+
   const [loadingSources, setLoadingSources] = useState(false);
   const [analyzingLabel, setAnalyzingLabel] = useState('');
   const [analyzingPhase, setAnalyzingPhase] = useState<'idle' | 'scraping' | 'preparing' | 'done'>('idle');
@@ -114,7 +147,8 @@ export const App = () => {
   // ── Options ─────────────────────────────────────────────────────────────
   const [topic, setTopic] = useState('New Media');
   const [mode, setMode] = useState<'video' | 'conversation'>('video');
-  const [imageCount, setImageCount] = useState(8);
+  const [imageCount, setImageCount] = useState(6);
+  const [depthLevel, setDepthLevel] = useState<'short' | 'critical' | 'depth'>('critical');
   const [presetStyle, setPresetStyle] = useState('Clean Editorial');
   const [customStyle, setCustomStyle] = useState('');
   const [podcastTone, setPodcastTone] = useState<'friendly' | 'serious' | 'deep_dive'>('friendly');
@@ -164,16 +198,41 @@ export const App = () => {
     setSessions((prev) => [session, ...prev]);
     setStep(1); setUrlInput(''); setRawText(''); setFiles([]);
     setSources([]); setResult(null); setError(''); setTopic('New Media');
+    setSessionOutputs([]);
     setAddMode('url');
     setView('studio');
   }, [deviceId, mode]);
 
-  const openSession = useCallback((s: Session) => {
-    setActiveSession(s); setTopic(s.title);
+  const openSession = useCallback(async (s: Session) => {
+    setActiveSession(s);
+    setTopic(s.title);
     setMode((s.mode as 'video' | 'conversation') || 'video');
-    setSources([]); setResult(null); setError('');
-    setStep(s.output_url ? 4 : 1);
+    setError('');
     setView('studio');
+
+    try {
+      const full = await apiGetSession(s.id);
+      setSources(full.sources || []);
+      setSessionOutputs(full.outputs || []);
+      if (full.output_url) {
+        setResult({
+          brief: { topic: full.title, output_mode: full.output_mode || full.mode },
+          mode: (full.output_mode || full.mode) as 'video' | 'conversation',
+          output_url: full.output_url,
+          narration: full.narration || '',
+          stages: ['Loaded from session history'],
+        });
+        setStep(4);
+      } else {
+        setResult(null);
+        setStep(full.sources && full.sources.length ? 2 : 1);
+      }
+    } catch {
+      setSources([]);
+      setSessionOutputs([]);
+      setResult(null);
+      setStep(s.output_url ? 4 : 1);
+    }
   }, []);
 
   const goHome = useCallback(() => {
@@ -298,6 +357,7 @@ export const App = () => {
         session_id: activeSession?.id,
         topic,
         image_count: imageCount,
+        depth_level: depthLevel,
         image_style: activeStyle,
         language: lang,
         output_mode: mode,
@@ -313,7 +373,18 @@ export const App = () => {
       if (activeSession) {
         const updated = await apiUpdateSession(activeSession.id, { title: topic, mode });
         setActiveSession(updated);
+        const newOutput: SessionOutput = {
+          id: `out_${Date.now()}`,
+          session_id: activeSession.id,
+          output_mode: mode,
+          output_url: res.output_url || '',
+          narration: res.narration || '',
+          items: res.turns || res.scenes,
+          created_at: new Date().toISOString(),
+        };
+        setSessionOutputs((prev) => [newOutput, ...prev]);
       }
+
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Generation failed.');
     } finally { setGenerating(false); }
@@ -381,6 +452,12 @@ export const App = () => {
         <div className={styles.brandGroup} onClick={goHome}>
           <div className={styles.brandLogoMark}>G</div>
           <span className={styles.brandName}>GenMind Studio</span>
+          {storageInfo?.is_b2 && (
+            <div className={styles.b2Badge} title={`Connected to Backblaze B2 cloud bucket: ${storageInfo.bucket}`}>
+              <span className={styles.b2Dot} />
+              <span>Backblaze B2 ({storageInfo.bucket})</span>
+            </div>
+          )}
         </div>
         <div className={styles.headerActions}>
           <button className={styles.btnSecondary} onClick={goHome} id="btn-back-home">All Sessions</button>
@@ -718,13 +795,37 @@ export const App = () => {
                     ))}
                   </div>
 
+                  {/* Content Depth Selector for both modes */}
+                  <div className={styles.formRow} style={{ marginBottom: 20 }}>
+                    <label className={styles.formLabel}>Explanation Depth & Detail</label>
+                    <div className={styles.toneChips}>
+                      {([
+                        ['short', 'Short (~2.5–3 min)', 'Quick definitions & key terms'],
+                        ['critical', 'Critical (~5–7 min)', 'Core terminology & technical mechanics'],
+                        ['depth', 'In-Depth (10m Video / 20–40m Podcast)', 'Multi-step deep dive with technical mechanics & examples']
+                      ] as const).map(([d, l, desc]) => (
+                        <div
+                          key={d}
+                          className={`${styles.toneChip} ${depthLevel === d ? styles.selected : ''}`}
+                          onClick={() => setDepthLevel(d)}
+                          id={`depth-${d}`}
+                        >
+                          <div style={{ fontWeight: 600 }}>{l}</div>
+                          <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{desc}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   {mode === 'video' && (
                     <>
                       <div className={styles.formRow}>
-                        <label className={styles.formLabel}>Scene Images: <span className={styles.rangeValue}>{imageCount}</span></label>
-                        <input id="image-count-slider" type="range" min={5} max={15} value={imageCount} onChange={(e) => setImageCount(Number(e.target.value))} className={styles.rangeInput} />
+                        <label className={styles.formLabel}>Dynamic AI Scene Images</label>
+                        <div style={{ fontSize: 12, color: 'var(--color-accent)', fontWeight: 600, background: 'var(--bg-accent)', padding: '8px 12px', borderRadius: 'var(--radius-md)' }}>
+                          ✨ LLM dynamically determines 3 to 8 scene images based on your selected depth ({depthLevel.toUpperCase()}).
+                        </div>
                       </div>
-                      <div className={styles.formRow}>
+                      <div className={styles.formRow} style={{ marginTop: 14 }}>
                         <label className={styles.formLabel}>Visual Style</label>
                         <div className={styles.styleChips}>
                           {STYLE_PRESETS.map((s) => (
@@ -733,12 +834,19 @@ export const App = () => {
                         </div>
                         <input id="custom-style-input" className={styles.inputField} placeholder="Or describe your own style…" value={customStyle} onChange={(e) => setCustomStyle(e.target.value)} style={{ marginTop: 8 }} />
                       </div>
+                      <div className={styles.formRow} style={{ marginTop: 14 }}>
+                        <div style={{ fontSize: 12, color: 'var(--color-muted)', background: 'var(--bg-muted)', padding: '8px 12px', borderRadius: 'var(--radius-md)' }}>
+                          🎙 A smooth, distinct English narrator voice will be automatically assigned for the video narration.
+                        </div>
+                      </div>
                     </>
                   )}
+
+
                   {mode === 'conversation' && (
                     <>
                       <div className={styles.formRow}>
-                        <label className={styles.formLabel}>Podcast Tone</label>
+                        <label className={styles.formLabel}>Podcast Tone & Dynamics</label>
                         <div className={styles.toneChips}>
                           {([['friendly', 'Friendly'], ['serious', 'Serious'], ['deep_dive', 'Deep Dive']] as const).map(([t, l]) => (
                             <div key={t} className={`${styles.toneChip} ${podcastTone === t ? styles.selected : ''}`} onClick={() => setPodcastTone(t)} id={`tone-${t}`}>{l}</div>
@@ -751,13 +859,8 @@ export const App = () => {
                       </div>
                     </>
                   )}
-                  <div className={styles.formRow}>
-                    <label className={styles.formLabel}>Narrator Voice</label>
-                    <select id="voice-select" className={styles.selectField} value={voice} onChange={(e) => setVoice(e.target.value)}>
-                      {languageVoices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-                    </select>
-                  </div>
                 </div>
+
                 <button id="btn-continue-to-generate" className={styles.btnPrimary} style={{ alignSelf: 'flex-start' }} onClick={() => setStep(3)}>
                   Continue to Generate
                 </button>
@@ -803,44 +906,35 @@ export const App = () => {
                 {result.mode === 'video' && result.output_url && (
                   <div className={styles.outputCard}>
                     <div className={styles.outputCardHeader}>
-                      <span className={styles.outputCardTitle}>Video Explanation ({result.images?.length || 0} Scenes)</span>
-                      <a href={`http://localhost:8000${result.output_url}`} download className={styles.outputDownloadBtn}>Download MP4</a>
+                      <span className={styles.outputCardTitle}>Video Explanation ({result.scenes?.length || result.images?.length || 0} Scenes)</span>
+                      <a href={resolveMediaUrl(result.output_url)} download className={styles.outputDownloadBtn}>Download MP4</a>
                     </div>
                     <div className={styles.outputMediaWrap}>
-                      <video id="output-video" className={styles.outputMedia} controls preload="metadata">
-                        <source src={`http://localhost:8000${result.output_url}`} type="video/mp4" />
-                      </video>
+                      <video
+                        id="output-video"
+                        className={styles.outputMedia}
+                        controls
+                        autoPlay
+                        key={result.output_url}
+                        src={resolveMediaUrl(result.output_url)}
+                      />
                     </div>
                   </div>
                 )}
                 {result.mode === 'conversation' && result.output_url && (
-                  <div className={styles.outputCard}>
-                    <div className={styles.outputCardHeader}>
+                  <div className={styles.outputCard} style={{ background: 'none', border: 'none', boxShadow: 'none', padding: 0 }}>
+                    <div className={styles.outputCardHeader} style={{ background: 'var(--bg-card)', padding: '16px 20px', borderRadius: '12px', marginBottom: 12 }}>
                       <span className={styles.outputCardTitle}>Podcast Audio ({result.turns?.length || 0} turns)</span>
-                      <a href={`http://localhost:8000${result.output_url}`} download className={styles.outputDownloadBtn}>Download MP3</a>
+                      <a href={resolveMediaUrl(result.output_url)} download className={styles.outputDownloadBtn}>Download MP3</a>
                     </div>
-                    <div style={{ padding: '20px 24px' }}>
-                      <audio id="output-audio" controls style={{ width: '100%' }}>
-                        <source src={`http://localhost:8000${result.output_url}`} type="audio/mpeg" />
-                      </audio>
-                    </div>
+                    <CustomAudioPlayer
+                      src={resolveMediaUrl(result.output_url)}
+                      turns={result.turns}
+                      topic={topic}
+                    />
                   </div>
                 )}
-                {result.mode === 'conversation' && result.turns && result.turns.length > 0 && (
-                  <div className={styles.outputCard}>
-                    <div className={styles.outputCardHeader}>
-                      <span className={styles.outputCardTitle}>Narration Script</span>
-                    </div>
-                    <div className={styles.scriptBlock}>
-                      {result.turns.map((t) => (
-                        <div key={t.index} className={styles.scriptLine}>
-                          {t.speaker_name && <div className={styles.scriptLineSpeaker}>{t.speaker_name}</div>}
-                          {t.narration}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+
                 <button className={styles.btnSecondary} onClick={() => setStep(1)} id="btn-edit-sources">
                   Edit Sources
                 </button>
@@ -849,13 +943,56 @@ export const App = () => {
           </div>
         </main>
 
-        {/* ─── RIGHT: Studio Output Panel ──────────────────────────────── */}
+        {/* ─── RIGHT: Studio Output Panel & Media History ─────────────── */}
         <aside className={styles.studioPanel}>
           <div className={styles.panelHeader}>
-            <span className={styles.panelTitle}>Studio</span>
+            <span className={styles.panelTitle}>Media History</span>
+            {currentSessionOutputs.length > 0 && (
+              <span className={styles.countBadge}>{currentSessionOutputs.length}</span>
+            )}
           </div>
           <div className={styles.studioPanelBody}>
-            {result ? (
+            {currentSessionOutputs.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {currentSessionOutputs.map((out, idx) => (
+                  <div
+                    key={out.id || idx}
+                    className={`${styles.outputResultCard} ${result?.output_url === out.output_url ? styles.selected : ''}`}
+                    onClick={() => {
+                      setResult({
+                        brief: { topic, output_mode: out.output_mode },
+                        mode: out.output_mode,
+                        output_url: out.output_url,
+                        narration: out.narration || '',
+                        turns: out.items || [],
+                        stages: out.stages || ['Loaded from session history'],
+                      });
+                      setStep(4);
+                    }}
+                    style={{ cursor: 'pointer', border: result?.output_url === out.output_url ? '1px solid var(--color-primary)' : undefined }}
+                  >
+                    <div className={styles.outputResultTitle}>
+                      {out.output_mode === 'video' ? '🎬 AI Video Explanation' : '🎙 AI Podcast Audio'}
+                    </div>
+                    <div className={styles.outputResultSub} style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>
+                      {out.items && out.items.length > 0 ? `${out.items.length} ${out.output_mode === 'conversation' ? 'turns' : 'scenes'} · ` : ''}
+                      {out.created_at ? new Date(out.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Saved output'}
+                    </div>
+                    {out.output_url && (
+                      <a
+                        href={resolveMediaUrl(out.output_url)}
+                        download
+                        className={styles.outputDownloadBtn}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ fontSize: 11, padding: '4px 8px', marginTop: 8, display: 'inline-block' }}
+                      >
+                        {out.output_mode === 'video' ? 'Download MP4' : 'Download MP3'}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : result ? (
               <div className={styles.outputResultCard}>
                 <div className={styles.outputResultTitle}>{topic}</div>
                 <div className={styles.outputResultSub}>
@@ -864,7 +1001,7 @@ export const App = () => {
                     : `${result.turns?.length || 0} turns · MP3`}
                 </div>
                 {result.output_url && (
-                  <a href={`http://localhost:8000${result.output_url}`} download className={styles.outputDownloadBtn} style={{ fontSize: 12, padding: '6px 12px' }}>
+                  <a href={resolveMediaUrl(result.output_url)} download target="_blank" rel="noreferrer" className={styles.outputDownloadBtn} style={{ fontSize: 12, padding: '6px 12px' }}>
                     {result.mode === 'video' ? 'Download MP4' : 'Download MP3'}
                   </a>
                 )}
@@ -877,11 +1014,13 @@ export const App = () => {
                   </svg>
                 </div>
                 <p className={styles.emptyPanelTitle}>No output yet</p>
-                <p className={styles.emptyPanelSub}>After generating, your video or podcast will appear here.</p>
+                <p className={styles.emptyPanelSub}>Generated videos or podcasts stored on Backblaze B2 will appear here.</p>
               </div>
             )}
           </div>
         </aside>
+
+
       </div>
 
       {/* Source Content Modal */}
