@@ -63,6 +63,7 @@ def init_db() -> None:
                 narration   TEXT,
                 stages      TEXT,
                 items_json  TEXT,
+                provenance_json TEXT,
                 created_at  TEXT NOT NULL
             );
         """)
@@ -87,6 +88,8 @@ def _migrate() -> None:
         existing_out = {row[1] for row in conn.execute("PRAGMA table_info(session_outputs)").fetchall()}
         if "items_json" not in existing_out:
             conn.execute("ALTER TABLE session_outputs ADD COLUMN items_json TEXT")
+        if "provenance_json" not in existing_out:
+            conn.execute("ALTER TABLE session_outputs ADD COLUMN provenance_json TEXT")
         conn.commit()
 
 def _now() -> str:
@@ -216,20 +219,24 @@ def save_session_output(
     output_url: str,
     narration: str,
     stages: List[str],
-    items: Optional[List[Dict[str, Any]]] = None
+    items: Optional[List[Dict[str, Any]]] = None,
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> None:
     now = _now()
     items_str = json.dumps(items or [])
+    provenance_str = json.dumps(provenance or {})
+    output_id = str(uuid.uuid4())
     with _connect() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO session_outputs (id, session_id, output_mode, output_url, narration, stages, items_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), session_id, output_mode, output_url, narration[:5000], json.dumps(stages), items_str, now)
+            "INSERT OR REPLACE INTO session_outputs (id, session_id, output_mode, output_url, narration, stages, items_json, provenance_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (output_id, session_id, output_mode, output_url, narration[:5000], json.dumps(stages), items_str, provenance_str, now)
         )
         conn.execute(
             "UPDATE sessions SET output_url = ?, output_mode = ?, narration = ?, updated_at = ? WHERE id = ?",
             (output_url, output_mode, narration[:500], now, session_id)
         )
         conn.commit()
+    return output_id
 
 def get_session_sources(session_id: str) -> List[Dict[str, Any]]:
     with _connect() as conn:
@@ -256,6 +263,10 @@ def get_session_outputs(session_id: str) -> List[Dict[str, Any]]:
             d["items"] = json.loads(d.get("items_json") or "[]")
         except Exception:
             d["items"] = []
+        try:
+            d["provenance"] = json.loads(d.get("provenance_json") or "{}")
+        except Exception:
+            d["provenance"] = {}
         results.append(d)
     return results
 

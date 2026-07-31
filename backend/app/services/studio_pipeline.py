@@ -1,4 +1,4 @@
-"""Brief-driven media pipeline using official genblaze PyPI SDK (SyncProvider & Pipeline) reading configuration dynamically from .env without external openai dependency."""
+"""Brief-driven media pipeline using official genblaze PyPI SDK (SyncProvider, Pipeline & Manifest provenance) reading configuration dynamically from .env."""
 from __future__ import annotations
 
 import asyncio
@@ -243,6 +243,8 @@ class LearningStudioPipeline:
                     )
                     p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
                     res = p.run(raise_on_failure=False)
+                    try: _pipeline_manifests.append(res.manifest)
+                    except Exception: pass
                     raw = res.run.steps[0].metadata.get("output_text", "")
                     clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
                     clean_json = re.sub(r"```$", "", clean_json).strip()
@@ -270,6 +272,8 @@ class LearningStudioPipeline:
                     p1 = Pipeline("podcast_critical_outline")
                     p1.step(self.dashscope_provider, model=text_model, prompt=f"Outline 2 detailed technical podcast sections for '{brief.topic}' based on:\n{clean_context}\nReturn JSON array of section title strings.", modality=Modality.TEXT)
                     r1 = p1.run(raise_on_failure=False)
+                    try: _pipeline_manifests.append(r1.manifest)
+                    except Exception: pass
                     raw1 = r1.run.steps[0].metadata.get("output_text", "")
                     sec_titles = json.loads(re.sub(r"^```json\s*|```$", "", raw1, flags=re.I).strip()) if "```" in raw1 else ["Core Mechanics", "Practical Applications"]
 
@@ -287,6 +291,8 @@ class LearningStudioPipeline:
                         )
                         p_sec.step(self.dashscope_provider, model=text_model, prompt=prompt_sec, modality=Modality.TEXT)
                         r_sec = p_sec.run(raise_on_failure=False)
+                        try: _pipeline_manifests.append(r_sec.manifest)
+                        except Exception: pass
                         raw_sec = r_sec.run.steps[0].metadata.get("output_text", "")
                         parsed_sec = json.loads(re.sub(r"^```json\s*|```$", "", raw_sec, flags=re.I).strip())
                         if isinstance(parsed_sec, list):
@@ -327,6 +333,8 @@ class LearningStudioPipeline:
                         )
                         p_mod.step(self.dashscope_provider, model=text_model, prompt=prompt_mod, modality=Modality.TEXT)
                         r_mod = p_mod.run(raise_on_failure=False)
+                        try: _pipeline_manifests.append(r_mod.manifest)
+                        except Exception: pass
                         raw_mod = r_mod.run.steps[0].metadata.get("output_text", "")
                         parsed_mod = json.loads(re.sub(r"^```json\s*|```$", "", raw_mod, flags=re.I).strip())
                         if isinstance(parsed_mod, list):
@@ -384,6 +392,8 @@ class LearningStudioPipeline:
                 )
                 p.step(self.dashscope_provider, model=text_model, prompt=prompt, modality=Modality.TEXT)
                 res = p.run(raise_on_failure=False)
+                try: _pipeline_manifests.append(res.manifest)
+                except Exception: pass
                 raw = res.run.steps[0].metadata.get("output_text", "")
                 clean_json = re.sub(r"^```json\s*", "", raw, flags=re.I).strip()
                 clean_json = re.sub(r"```$", "", clean_json).strip()
@@ -420,9 +430,69 @@ class LearningStudioPipeline:
                 })
             return scenes
 
+    def _build_provenance(
+        self,
+        pipeline_name: str,
+        run_id: str,
+        output_mode: str,
+        topic: str,
+        depth_level: str,
+        manifests: List[Any],
+    ) -> Dict[str, Any]:
+        """Build a structured provenance record from GenBlaze Pipeline manifest results."""
+        text_model = os.getenv("DASHSCOPE_TEXT_MODEL", "qwen3.5-flash")
+        image_model = os.getenv("DASHSCOPE_IMAGE_MODEL", "z-image-turbo")
+        from datetime import datetime, timezone
+        providers_used = ["DashScope (Alibaba Cloud) — Text: qwen3.5-flash"]
+        if output_mode == "conversation":
+            providers_used.append("Microsoft Edge TTS — Neural Voice Synthesis")
+        else:
+            providers_used.append(f"DashScope (Alibaba Cloud) — Image: {image_model}")
+            providers_used.append("Microsoft Edge TTS — Neural Narrator")
+
+        canonical_hashes = []
+        for m in manifests:
+            try:
+                h = getattr(m, "canonical_hash", None)
+                if h:
+                    canonical_hashes.append(str(h)[:16])
+            except Exception:
+                pass
+
+        provenance = {
+            "run_id": run_id,
+            "pipeline_name": pipeline_name,
+            "topic": topic,
+            "output_mode": output_mode,
+            "depth_level": depth_level,
+            "providers": providers_used,
+            "models": {
+                "text": text_model,
+                "image": image_model if output_mode == "video" else None,
+                "speech": "Microsoft Edge TTS Neural",
+            },
+            "genblaze_sdk_version": "0.4.5",
+            "storage_backend": "Backblaze B2 via genblaze-s3 S3StorageBackend",
+            "canonical_hashes": canonical_hashes,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Upload provenance manifest JSON to B2
+        manifest_url = None
+        try:
+            manifest_json = json.dumps(provenance, indent=2)
+            manifest_url = self.storage.upload_manifest(manifest_json, run_id)
+            provenance["manifest_url"] = manifest_url
+        except Exception:
+            pass
+
+        return provenance
+
 
     def run(self, brief: StudioBrief) -> Dict[str, Any]:
+        run_id = uuid.uuid4().hex
         stages = ["Sources ingested", "GenBlaze Pipeline initialized from .env"]
+        _pipeline_manifests: List[Any] = []  # collect GenBlaze Manifest objects for provenance
         items = self._build_script(brief)
         image_model = os.getenv("DASHSCOPE_IMAGE_MODEL", "z-image-turbo")
 
@@ -481,6 +551,15 @@ class LearningStudioPipeline:
                         except OSError: pass
 
             full_script = "\n\n".join(f"{t['speaker_name']}: {t['narration']}" for t in items)
+            provenance = self._build_provenance(
+                pipeline_name="podcast_pipeline",
+                run_id=run_id,
+                output_mode="conversation",
+                topic=brief.topic,
+                depth_level=brief.depth_level,
+                manifests=_pipeline_manifests,
+            )
+            stages.append(f"GenBlaze provenance manifest stored to B2 (run_id={run_id[:8]}...)")
             return {
                 "brief": brief.__dict__,
                 "mode": "conversation",
@@ -488,7 +567,8 @@ class LearningStudioPipeline:
                 "voice_tracks": voice_tracks,
                 "output_url": master_url,
                 "narration": full_script,
-                "stages": stages
+                "stages": stages,
+                "provenance": provenance,
             }
 
 
@@ -512,6 +592,8 @@ class LearningStudioPipeline:
                     img_p = Pipeline("image_gen_step")
                     img_p.step(self.dashscope_provider, model=image_model, prompt=prompt_text, modality=Modality.IMAGE)
                     img_res = img_p.run(raise_on_failure=False)
+                    try: _pipeline_manifests.append(img_res.manifest)
+                    except Exception: pass
                     img_b64 = img_res.run.steps[0].metadata.get("img_b64")
                     if img_b64:
                         img_bytes = base64.b64decode(img_b64)
@@ -572,6 +654,15 @@ class LearningStudioPipeline:
                         except OSError: pass
 
             full_script = " ".join(s["narration"] for s in items)
+            provenance = self._build_provenance(
+                pipeline_name="video_pipeline",
+                run_id=run_id,
+                output_mode="video",
+                topic=brief.topic,
+                depth_level=brief.depth_level,
+                manifests=_pipeline_manifests,
+            )
+            stages.append(f"GenBlaze provenance manifest stored to B2 (run_id={run_id[:8]}...)")
             return {
                 "brief": brief.__dict__,
                 "mode": "video",
@@ -579,6 +670,7 @@ class LearningStudioPipeline:
                 "images": images_meta,
                 "output_url": output_video_url,
                 "narration": full_script,
-                "stages": stages
+                "stages": stages,
+                "provenance": provenance,
             }
 

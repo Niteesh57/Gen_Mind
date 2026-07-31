@@ -1,3 +1,4 @@
+import json
 import os
 import urllib.request
 from typing import Any, Dict, List, Literal, Optional
@@ -70,11 +71,20 @@ class SessionUpdateRequest(BaseModel):
 @router.get("/storage/info")
 def get_storage_info() -> Dict[str, Any]:
     is_b2 = isinstance(_storage, BackblazeB2StorageBackend)
+    stats = {}
+    if is_b2:
+        try:
+            stats = _storage.get_storage_stats()
+        except Exception:
+            pass
     return {
-        "engine": "Backblaze B2 Cloud Storage" if is_b2 else "Local Storage",
+        "engine": "Backblaze B2 Cloud Storage (genblaze-s3 S3StorageBackend)" if is_b2 else "Local Storage",
+        "sdk": "genblaze-s3" if is_b2 else "local",
         "is_b2": is_b2,
         "bucket": getattr(_storage, "bucket_name", None),
         "endpoint": getattr(_storage, "endpoint_url", None),
+        "region": getattr(_storage, "region_name", None),
+        "stats": stats,
         "active": True
     }
 
@@ -92,6 +102,84 @@ def stream_media(url: str):
         return StreamingResponse(resp, media_type=content_type)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to stream media asset: {exc}")
+
+@router.get("/info")
+def get_app_info() -> Dict[str, Any]:
+    """Comprehensive info endpoint for hackathon submission — lists all AI providers, models, and infrastructure."""
+    is_b2 = isinstance(_storage, BackblazeB2StorageBackend)
+    return {
+        "app": "Gen_Mind — AI-Powered NotebookLM & Generative Media Studio",
+        "description": "Multi-modal AI media generation platform: upload sources → generate AI video explanations and podcast discussions → store to Backblaze B2.",
+        "version": "2.0.0",
+        "hackathon": "Backblaze Generative Media Hackathon 2026",
+        "providers": [
+            {
+                "name": "DashScope (Alibaba Cloud)",
+                "type": "Text Generation + Image Generation",
+                "models": [
+                    os.getenv("DASHSCOPE_TEXT_MODEL", "qwen3.5-flash"),
+                    os.getenv("DASHSCOPE_IMAGE_MODEL", "z-image-turbo"),
+                ],
+                "role": "Script generation, image synthesis for video scenes",
+            },
+            {
+                "name": "Microsoft Edge TTS",
+                "type": "Neural Speech Synthesis",
+                "models": ["en-US-JennyNeural", "en-US-GuyNeural", "en-US-AriaNeural", "en-IN-NeerjaNeural", "en-GB-SoniaNeural"],
+                "role": "Multi-speaker podcast voices and video narration",
+            },
+        ],
+        "genblaze": {
+            "sdk_version": "0.4.5",
+            "storage_sdk": "genblaze-s3 v0.3.6",
+            "components_used": [
+                "Pipeline — multi-step generative media orchestration",
+                "SyncProvider — custom DashScope/Qwen text+image provider",
+                "Manifest — provenance tracking for every generated asset",
+                "PipelineResult — canonical hash + run metadata",
+                "genblaze_s3.S3StorageBackend — native B2 storage backend",
+            ],
+        },
+        "storage": {
+            "provider": "Backblaze B2 Cloud Storage" if is_b2 else "Local Storage",
+            "sdk": "genblaze-s3 S3StorageBackend",
+            "bucket": getattr(_storage, "bucket_name", None),
+            "region": getattr(_storage, "region_name", None),
+            "endpoint": getattr(_storage, "endpoint_url", None),
+            "access": "Private bucket — S3 Presigned URLs (AWS4-HMAC-SHA256, 24h expiry)",
+            "prefixes": {"videos": "videos/", "audio": "audio/", "images": "images/", "manifests": "manifests/"},
+        },
+        "capabilities": [
+            "Video Explanation: AI-generated 16:9 images + neural narration → MP4 stored on B2",
+            "Podcast Audio: Multi-speaker dialogue with synchronized transcript → MP3 stored on B2",
+            "Source Intake: Web scraping, PDF/DOCX parsing → appended to session knowledge base",
+            "Provenance Manifests: GenBlaze Manifest JSON for every generation → stored under manifests/ on B2",
+            "Session Isolation: Each notebook's media is strictly filtered per session",
+            "Depth Modes: Short (2.5min), Critical (5-7min), Deep (20-45min)",
+        ],
+    }
+
+@router.get("/provenance/{output_id}")
+def get_provenance(output_id: str) -> Dict[str, Any]:
+    """Retrieve the stored GenBlaze provenance manifest for a generated output."""
+    with session_db._connect() as conn:
+        row = conn.execute(
+            "SELECT provenance_json, output_mode, output_url, created_at FROM session_outputs WHERE id = ?",
+            (output_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Output not found.")
+    try:
+        provenance = json.loads(row["provenance_json"] or "{}")
+    except Exception:
+        provenance = {}
+    return {
+        "output_id": output_id,
+        "output_mode": row["output_mode"],
+        "output_url": row["output_url"],
+        "created_at": row["created_at"],
+        "provenance": provenance,
+    }
 
 @router.get("/studio/voices")
 def list_studio_voices() -> List[Dict[str, str]]:
@@ -192,8 +280,8 @@ def generate_learning_media(req: StudioGenerateRequest, studio: LearningStudioPi
             output_url=result.get("output_url", ""),
             narration=result.get("narration", ""),
             stages=result.get("stages", []),
-            items=items
+            items=items,
+            provenance=result.get("provenance"),
         )
-
 
     return result

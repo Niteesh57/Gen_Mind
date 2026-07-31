@@ -40,7 +40,23 @@ interface SessionOutput {
   narration: string;
   stages?: string[];
   items?: Turn[];
+  provenance?: ProvenanceRecord;
   created_at?: string;
+}
+
+interface ProvenanceRecord {
+  run_id?: string;
+  pipeline_name?: string;
+  topic?: string;
+  output_mode?: string;
+  depth_level?: string;
+  providers?: string[];
+  models?: { text?: string; image?: string | null; speech?: string };
+  genblaze_sdk_version?: string;
+  storage_backend?: string;
+  canonical_hashes?: string[];
+  generated_at?: string;
+  manifest_url?: string;
 }
 
 
@@ -162,6 +178,7 @@ export const App = () => {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<LearningMediaResult | null>(null);
   const [error, setError] = useState('');
+  const [provenanceModal, setProvenanceModal] = useState<ProvenanceRecord | null>(null);
 
   // ── Init ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -989,6 +1006,16 @@ export const App = () => {
                         {out.output_mode === 'video' ? 'Download MP4' : 'Download MP3'}
                       </a>
                     )}
+                    {out.provenance && out.provenance.run_id && (
+                      <button
+                        className={styles.outputDownloadBtn}
+                        onClick={(e) => { e.stopPropagation(); setProvenanceModal(out.provenance!); }}
+                        style={{ fontSize: 11, padding: '4px 8px', marginTop: 4, display: 'inline-block', marginLeft: 4, background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', border: 'none', cursor: 'pointer', color: '#fff', borderRadius: 6 }}
+                        title="View GenBlaze provenance manifest"
+                      >
+                        🔍 Provenance
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1033,6 +1060,56 @@ export const App = () => {
             </div>
             <div className={styles.modalBody}>
               <p className={styles.contentText}>{viewingSource.content || viewingSource.excerpt}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Provenance Manifest Modal */}
+      {provenanceModal && (
+        <div className={styles.modalOverlay} onClick={() => setProvenanceModal(null)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div className={styles.modalHeader}>
+              <span className={styles.modalTitle}>🔍 GenBlaze Provenance Manifest</span>
+              <button className={styles.modalClose} onClick={() => setProvenanceModal(null)}>×</button>
+            </div>
+            <div className={styles.modalBody} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ background: 'var(--bg-muted)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Run ID</div>
+                <code style={{ fontSize: 12, color: 'var(--color-accent)', wordBreak: 'break-all' }}>{provenanceModal.run_id}</code>
+              </div>
+              {provenanceModal.canonical_hashes && provenanceModal.canonical_hashes.length > 0 && (
+                <div style={{ background: 'var(--bg-muted)', borderRadius: 8, padding: 12 }}>
+                  <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>GenBlaze Canonical Hashes</div>
+                  {provenanceModal.canonical_hashes.map((h, i) => <code key={i} style={{ fontSize: 11, display: 'block', color: '#10b981' }}>{h}…</code>)}
+                </div>
+              )}
+              <div style={{ background: 'var(--bg-muted)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>AI Providers Used</div>
+                {(provenanceModal.providers || []).map((p, i) => <div key={i} style={{ fontSize: 12, color: 'var(--color-text)', padding: '2px 0' }}>• {p}</div>)}
+              </div>
+              <div style={{ background: 'var(--bg-muted)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Models</div>
+                {provenanceModal.models?.text && <div style={{ fontSize: 12 }}>📝 Text: <strong>{provenanceModal.models.text}</strong></div>}
+                {provenanceModal.models?.image && <div style={{ fontSize: 12 }}>🖼 Image: <strong>{provenanceModal.models.image}</strong></div>}
+                {provenanceModal.models?.speech && <div style={{ fontSize: 12 }}>🎙 Speech: <strong>{provenanceModal.models.speech}</strong></div>}
+              </div>
+              <div style={{ background: 'var(--bg-muted)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Infrastructure</div>
+                <div style={{ fontSize: 12 }}>⚡ GenBlaze SDK: <strong>{provenanceModal.genblaze_sdk_version}</strong></div>
+                <div style={{ fontSize: 12 }}>☁️ Storage: <strong>{provenanceModal.storage_backend}</strong></div>
+                <div style={{ fontSize: 12 }}>🕐 Generated: <strong>{provenanceModal.generated_at ? new Date(provenanceModal.generated_at).toLocaleString() : '—'}</strong></div>
+              </div>
+              {provenanceModal.manifest_url && (
+                <a
+                  href={provenanceModal.manifest_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 12, color: 'var(--color-accent)', textDecoration: 'underline' }}
+                >
+                  📄 View Full Manifest JSON on Backblaze B2 →
+                </a>
+              )}
             </div>
           </div>
         </div>
