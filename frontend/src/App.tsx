@@ -27,7 +27,7 @@ function getOrCreateDeviceId(): string {
 }
 
 // ── Session API ──────────────────────────────────────────────────────────────
-const BACKEND_HOST = 'http://localhost:8000';
+const BACKEND_HOST = import.meta.env.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL.replace('/api', '') : (import.meta.env.PROD ? '' : 'http://localhost:8000');
 const API_BASE = `${BACKEND_HOST}/api`;
 
 export const resolveMediaUrl = (url?: string) => {

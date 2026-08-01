@@ -82,7 +82,8 @@ class DashScopeGenblazeProvider(SyncProvider):
             content_list = []
             for img in input_images:
                 if img:
-                    img_full = f"http://localhost:8000{img}" if img.startswith("/static/") else img
+                    public_host = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
+                    img_full = f"{public_host}{img}" if img.startswith("/static/") else img
                     content_list.append({"image": img_full})
             content_list.append({"text": step.prompt[:1200]})
 
