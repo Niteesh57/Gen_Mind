@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  gen-mind:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: Gen_Mind
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - PORT=8000
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./backend/static:/app/backend/static
+    restart: unless-stopped

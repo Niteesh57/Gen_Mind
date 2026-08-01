@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addSourcesToSession,
   generateLearningMedia,
+  getStorageInfo,
   getStudioVoices,
   inspectStudioSources,
   uploadStudioDocument,
   type LearningMediaResult,
+  type StorageInfo,
   type StudioSource,
   type StudioVoice,
 } from './services/studioClient';
@@ -128,7 +130,6 @@ function formatDate(iso: string) {
 function fmtWords(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`; }
 
 type AddMode = 'url' | 'file' | 'text';
-interface StorageInfo { is_b2: boolean; bucket: string; }
 
 // ════════════════════════════════════════════════════════════════════════════
 export const App = () => {
@@ -161,20 +162,19 @@ export const App = () => {
   const [analyzingLabel, setAnalyzingLabel] = useState('');
   const [analyzingPhase, setAnalyzingPhase] = useState<'idle' | 'scraping' | 'preparing' | 'done'>('idle');
   const [viewingSource, setViewingSource] = useState<StudioSource | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const sidebarFileRef = useRef<HTMLInputElement>(null);
 
   // ── Options ─────────────────────────────────────────────────────────────
   const [topic, setTopic] = useState('New Media');
   const [mode, setMode] = useState<'video' | 'conversation'>('video');
-  const [imageCount, setImageCount] = useState(6);
+  const [imageCount, _setImageCount] = useState(6);
   const [depthLevel, setDepthLevel] = useState<'short' | 'critical' | 'depth'>('critical');
   const [presetStyle, setPresetStyle] = useState('Clean Editorial');
   const [customStyle, setCustomStyle] = useState('');
   const [podcastTone, setPodcastTone] = useState<'friendly' | 'serious' | 'deep_dive'>('friendly');
   const [participantCount, setParticipantCount] = useState(2);
   const [participantVoices, setParticipantVoices] = useState<string[]>([]);
-  const [lang, setLang] = useState('en-US');
+  const [lang, _setLang] = useState('en-US');
   const [voices, setVoices] = useState<StudioVoice[]>([]);
   const [voice, setVoice] = useState('en-US-JennyNeural');
 
@@ -214,6 +214,9 @@ export const App = () => {
     getStudioVoices()
       .then((list) => setVoices(list.length ? list : FALLBACK_VOICES))
       .catch(() => setVoices(FALLBACK_VOICES));
+    getStorageInfo()
+      .then(setStorageInfo)
+      .catch(() => {});
   }, []);
 
   const languageVoices = useMemo(
@@ -263,6 +266,7 @@ export const App = () => {
           mode: (latest.output_mode || full.mode) as 'video' | 'conversation',
           output_url: latest.output_url,
           narration: latest.narration || '',
+          turns: latest.items,
           items: latest.items,
           provenance: latest.provenance,
           stages: ['Loaded from session history'],
@@ -479,9 +483,9 @@ export const App = () => {
     return (
       <div className={styles.appShell}>
         <header className={styles.globalHeader}>
-          <div className={styles.brandGroup}>
-            <div className={styles.brandLogoMark}>G</div>
-            <span className={styles.brandName}>GenMind Studio</span>
+          <div className={styles.brandGroup} style={{ cursor: 'pointer' }} onClick={goHome}>
+            <img src="/favicon.svg" alt="Gen Mind" width="28" height="28" style={{ borderRadius: 6 }} />
+            <span className={styles.brandName}>Gen Mind Studio</span>
           </div>
         </header>
         <main className={styles.homeView}>
@@ -529,8 +533,8 @@ export const App = () => {
     <div className={styles.appShell}>
       <header className={styles.globalHeader}>
         <div className={styles.brandGroup} onClick={goHome}>
-          <div className={styles.brandLogoMark}>G</div>
-          <span className={styles.brandName}>GenMind Studio</span>
+          <img src="/favicon.svg" alt="Gen Mind" width="28" height="28" style={{ borderRadius: 6 }} />
+          <span className={styles.brandName}>Gen Mind Studio</span>
           {storageInfo?.is_b2 && (
             <div className={styles.b2Badge} title={`Connected to Backblaze B2 cloud bucket: ${storageInfo.bucket}`}>
               <span className={styles.b2Dot} />
@@ -1014,7 +1018,7 @@ export const App = () => {
                     </div>
                     <CustomAudioPlayer
                       src={resolveMediaUrl(result.output_url)}
-                      turns={result.turns}
+                      turns={result.turns as Turn[]}
                       topic={topic}
                     />
                   </div>

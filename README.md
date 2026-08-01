@@ -171,13 +171,26 @@ Gen_Mind is built natively on top of **GenBlaze SDK v0.4.5**, utilizing its core
 
 ## Setup Instructions
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Backblaze B2 account + private bucket
-- DashScope API key
+### 🐳 Docker Single-Command Setup (Gen Mind Container)
 
-### Backend Setup
+Build and launch the complete Gen Mind application (React frontend + FastAPI backend) in a single unified container:
+
+```bash
+# Option 1: Using Docker Compose (Recommended)
+docker compose up --build
+
+# Option 2: Using Docker CLI directly
+docker build -t gen-mind .
+docker run -p 8000:8000 --env-file backend/.env --name Gen_Mind gen-mind
+```
+
+Open [http://localhost:8000](http://localhost:8000) in your browser.
+
+---
+
+### Manual Development Setup
+
+#### Backend Setup
 
 ```bash
 cd backend
@@ -198,7 +211,7 @@ cp .env.example .env
 uvicorn app.main:app --port 8000 --reload
 ```
 
-### Frontend Setup
+#### Frontend Setup
 
 ```bash
 cd frontend

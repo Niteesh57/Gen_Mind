@@ -14,7 +14,9 @@ export interface LearningMediaResult {
   brief: any;
   mode: 'video' | 'conversation';
   scenes?: any[];
-  turns?: Array<{ index: number; speaker_name?: string; narration: string; voice?: string }>;
+  turns?: Array<{ index: number; speaker_name: string; narration: string; voice?: string }>;
+  items?: any[];
+  provenance?: any;
   images?: Array<{ index: number; title: string; url: string }>;
   voice_tracks?: Array<{ index: number; speaker: string; voice: string; narration: string; url: string }>;
   output_url: string | null;
@@ -100,11 +102,28 @@ export const uploadStudioDocument = async (file: File, sessionId?: string): Prom
   return res.json();
 };
 
-export const addSourcesToSession = async (sessionId: string, sources: StudioSource[]): Promise<void> => {
-  if (!sessionId || !sources.length) return;
-  await fetch(`${API_BASE_URL}/studio/sources/add`, {
+export interface StorageInfo {
+  storage_engine: string;
+  is_b2: boolean;
+  bucket: string;
+}
+
+export const getStorageInfo = async (): Promise<StorageInfo> => {
+  const res = await fetch(`${API_BASE_URL.replace('/api', '')}/api/storage/info`);
+  if (!res.ok) throw new Error('Could not fetch storage info');
+  return res.json();
+};
+
+export const addSourcesToSession = async (
+  sessionId: string,
+  sources: StudioSource[]
+): Promise<void> => {
+  const res = await fetch(`${API_BASE_URL}/studio/sources/add`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id: sessionId, sources }),
   });
+  if (!res.ok) {
+    throw await apiError(res, 'add sources to session');
+  }
 };

@@ -22,7 +22,7 @@ const SPEAKER_COLORS = [
   '#d97706', // Amber
 ];
 
-export const CustomAudioPlayer: React.FC<CustomAudioPlayerProps> = ({ src, turns = [], topic }) => {
+export const CustomAudioPlayer: React.FC<CustomAudioPlayerProps> = ({ src, turns = [], topic: _topic }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);

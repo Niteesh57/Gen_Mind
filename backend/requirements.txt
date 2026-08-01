@@ -10,3 +10,5 @@ pypdf
 moviepy
 python-dotenv
 pillow
+dashscope
+python-multipart
