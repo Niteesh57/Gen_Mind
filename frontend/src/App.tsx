@@ -434,7 +434,9 @@ export const App = () => {
     if (!topic.trim()) { setError('Please enter a topic title.'); return; }
     setGenerating(true); setError('');
     try {
-      const activeStyle = customStyle.trim() || presetStyle;
+      const activeStyle = customStyle.trim()
+        ? `${presetStyle} style, with user prompt: ${customStyle.trim()}`
+        : presetStyle;
       const res = await generateLearningMedia({
         project_id: activeSession?.id || `media_${Date.now()}`,
         session_id: activeSession?.id,
@@ -915,13 +917,21 @@ export const App = () => {
                         </div>
                       </div>
                       <div className={styles.formRow} style={{ marginTop: 14 }}>
-                        <label className={styles.formLabel}>Visual Style</label>
+                        <label className={styles.formLabel}>Visual Style Preset</label>
                         <div className={styles.styleChips}>
                           {STYLE_PRESETS.map((s) => (
-                            <button key={s} className={`${styles.styleChip} ${presetStyle === s && !customStyle ? styles.selected : ''}`} onClick={() => { setPresetStyle(s); setCustomStyle(''); }}>{s}</button>
+                            <button key={s} className={`${styles.styleChip} ${presetStyle === s ? styles.selected : ''}`} onClick={() => { setPresetStyle(s); }}>{s}</button>
                           ))}
                         </div>
-                        <input id="custom-style-input" className={styles.inputField} placeholder="Or describe your own style…" value={customStyle} onChange={(e) => setCustomStyle(e.target.value)} style={{ marginTop: 8 }} />
+                        <label className={styles.formLabel} style={{ marginTop: 12, fontSize: 12, display: 'block' }}>User Prompt / Visual Expectations</label>
+                        <textarea
+                          id="custom-style-input"
+                          className={styles.inputField}
+                          placeholder="What are you expecting from the video visuals? (e.g. 'I need white background with less text')"
+                          value={customStyle}
+                          onChange={(e) => setCustomStyle(e.target.value)}
+                          style={{ marginTop: 6, minHeight: 60 }}
+                        />
                       </div>
                       <div className={styles.formRow} style={{ marginTop: 14 }}>
                         <div style={{ fontSize: 12, color: 'var(--color-muted)', background: 'var(--bg-muted)', padding: '8px 12px', borderRadius: 'var(--radius-md)' }}>

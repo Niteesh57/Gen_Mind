@@ -635,14 +635,15 @@ class LearningStudioPipeline:
                 narration = scene["narration"]
                 title = scene["title"]
 
-                prompt_text = f"{title}: {narration[:300]}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed."
+                clean_visual_suffix = " Strictly do not generate any text, letters, words, sentences, or characters inside the image. The image must be 100% clean and purely visual, containing only icons, symbols, shapes, graphics, and diagrams with NO textual labels or captions whatsoever."
+                prompt_text = f"{title}: {narration[:300]}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed.{clean_visual_suffix}"
                 img_bytes = None
                 image_source = f"GenBlaze Pipeline ({image_model} 16:9 Widescreen)"
 
                 # Assign exactly 1 user photo per scene (round-robin), model supports max 3 images
                 matched_user_photo = user_image_assets[(idx - 1) % len(user_image_assets)] if user_image_assets else None
                 if matched_user_photo:
-                    prompt_text = f"Create a widescreen 16:9 visual scene for '{title}' inspired by the reference image. Narration: {narration[:250]}. Style: {brief.image_style}."
+                    prompt_text = f"Create a widescreen 16:9 visual scene for '{title}' inspired by the reference image. Narration: {narration[:250]}. Style: {brief.image_style}.{clean_visual_suffix}"
 
                 try:
                     import base64
@@ -673,7 +674,7 @@ class LearningStudioPipeline:
                 if not img_bytes:
                     try:
                         import base64
-                        t2i_prompt = f"{title}: {narration[:300]}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed, photorealistic."
+                        t2i_prompt = f"{title}: {narration[:300]}. Visual style: {brief.image_style}. Widescreen 16:9 PC composition, highly detailed, photorealistic.{clean_visual_suffix}"
                         img_p2 = Pipeline(f"image_t2i_{idx}_{uuid.uuid4().hex[:6]}")
                         img_p2.step(self.dashscope_provider, model=image_model, prompt=t2i_prompt, modality=Modality.IMAGE)
                         img_res2 = img_p2.run(raise_on_failure=False)
